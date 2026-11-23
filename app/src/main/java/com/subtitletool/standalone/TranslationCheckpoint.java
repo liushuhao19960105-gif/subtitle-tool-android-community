@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.security.MessageDigest;
 import java.util.List;
 import org.json.JSONArray;
@@ -115,7 +116,13 @@ final class TranslationCheckpoint {
         try(FileOutputStream out=new FileOutputStream(tmp)){
             out.write(bytes);out.getFD().sync();
         }
-        Files.move(tmp.toPath(),path.toPath(),StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Files.move(tmp.toPath(),path.toPath(),StandardCopyOption.ATOMIC_MOVE,
+                       StandardCopyOption.REPLACE_EXISTING);
+        }catch(AtomicMoveNotSupportedException unsupported){
+            // Same private directory, with a synced temporary file; fallback remains recoverable.
+            Files.move(tmp.toPath(),path.toPath(),StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     static void clear(Context ctx) {
