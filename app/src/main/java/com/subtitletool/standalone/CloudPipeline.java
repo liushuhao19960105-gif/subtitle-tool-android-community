@@ -252,6 +252,7 @@ public final class CloudPipeline {
             int from=reviewRanges.get(n)[0],to=reviewRanges.get(n)[1];
             JSONObject input=new JSONObject();
             input.put("target",toArray(cues,from,to,true));
+            addDialogueHints(input,cues,from,to);
             input.put("sentence_groups",sentenceGroups(cues,from,to));
             input.put("previous_chinese",toArray(cues,Math.max(0,from-8),from,true));
             input.put("next_chinese",toArray(cues,to,Math.min(cues.size(),to+8),true));
