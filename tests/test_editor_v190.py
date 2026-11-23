@@ -40,7 +40,7 @@ class EditorV190Tests(unittest.TestCase):
                        'if(saving){', '字幕正在保存，请完成后返回',
                        'setItems(labels,(dialog,which)->'):
             self.assertIn(marker,ACTIVITY)
-        self.assertLess(ACTIVITY.index('saving=false;\\n                            refreshProblemNavigator();'),
+        self.assertLess(ACTIVITY.index("saving=false;" + chr(10) + "                            refreshProblemNavigator();"),
                         ACTIVITY.index('Toast.makeText(this,"字幕已保存'))
         self.assertIn('if(current.size()>=60)break;',ACTIVITY)
 
