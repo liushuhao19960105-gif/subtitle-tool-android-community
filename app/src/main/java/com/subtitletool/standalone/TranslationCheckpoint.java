@@ -22,12 +22,12 @@ final class TranslationCheckpoint {
     private static final String FILE="translation_checkpoint_v184.json";
     final String source, config;
     final List<SubtitleData.Cue> cues;
-    int firstDone, reviewDone;
+    int firstDone, reviewDone, deepDone;
 
     private TranslationCheckpoint(String source,String config,List<SubtitleData.Cue> cues,
                                   int firstDone,int reviewDone) {
         this.source=source;this.config=config;this.cues=cues;
-        this.firstDone=firstDone;this.reviewDone=reviewDone;
+        this.firstDone=firstDone;this.reviewDone=reviewDone;this.deepDone=0;
     }
 
     static TranslationCheckpoint fresh(String source,String config,List<SubtitleData.Cue> cues) {
@@ -48,6 +48,12 @@ final class TranslationCheckpoint {
         return digest(settings.getBytes(StandardCharsets.UTF_8));
     }
 
+    /** Standard uses the prior fingerprint so existing V1.8.4 progress remains resumable. */
+    static String configuration(String asr,String endpoint,String model,TranslationMode mode) throws Exception {
+        String standard=configuration(asr,endpoint,model);
+        if(mode==TranslationMode.STANDARD)return standard;
+        return digest((standard+"\nquality="+mode.id).getBytes(StandardCharsets.UTF_8));
+    }
     /** Requires source size and a content sample to guard against accidental reuse. */
     static String sourceIdentity(Context context,Uri uri,String name) {
         if(uri==null)return null;
@@ -88,19 +94,23 @@ final class TranslationCheckpoint {
             JSONArray arr=o.getJSONArray("cues");
             if(arr.length()==0 || arr.length()>4000)return null;
             List<SubtitleData.Cue> cues=SubtitleData.fromJson(arr);
-            int first=o.getInt("firstDone"),review=o.getInt("reviewDone");
+            int first=o.getInt("firstDone"),review=o.getInt("reviewDone"),deep=o.optInt("deepDone",0);
             int countFirst=CloudPipeline.batchCount(cues,15);
             int countReview=CloudPipeline.batchCount(cues,20);
             if(first<0 || first>countFirst || review<0 || review>countReview ||
-                    (review>0 && first!=countFirst))return null;
+                    deep<0 || deep>countReview || (review>0 && first!=countFirst) ||
+                    (deep>0 && review!=countReview))return null;
             // Validate every completed batch. Never reuse partial/blank responses.
             if(!CloudPipeline.hasCompletedPrefix(cues,15,first))return null;
             if(review>0 && !CloudPipeline.hasCompletedPrefix(cues,20,review))return null;
+            if(deep>0 && !CloudPipeline.hasCompletedPrefix(cues,20,deep))return null;
             for(int i=0;i<cues.size();i++){
                 SubtitleData.Cue c=cues.get(i);
                 if(c.id!=i+1 || c.en==null || c.en.isEmpty() || c.endMs<=c.startMs)return null;
             }
-            return new TranslationCheckpoint(source,config,cues,first,review);
+            TranslationCheckpoint result=new TranslationCheckpoint(source,config,cues,first,review);
+            result.deepDone=deep;
+            return result;
         }catch(Exception e){return null;} // Corrupt/stale checkpoint cannot poison output.
     }
 
@@ -108,7 +118,7 @@ final class TranslationCheckpoint {
         if(source==null)return;
         JSONObject o=new JSONObject();
         o.put("version",VERSION).put("source",source).put("config",config)
-         .put("firstDone",firstDone).put("reviewDone",reviewDone)
+         .put("firstDone",firstDone).put("reviewDone",reviewDone).put("deepDone",deepDone)
          .put("cues",SubtitleData.toJson(cues));
         File path=file(ctx),tmp=new File(ctx.getFilesDir(),FILE+".tmp");
         byte[] bytes=o.toString().getBytes(StandardCharsets.UTF_8);
