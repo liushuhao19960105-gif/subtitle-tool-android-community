@@ -1,0 +1,6 @@
+# Only the repository owner reviews changes for the protected branch.
+# Enforce this with branch rules requiring code-owner reviews.
+* @liushuhao19960105-gif
+/.github/workflows/ @liushuhao19960105-gif
+/app/build.gradle @liushuhao19960105-gif
+/setup_stable_signing.sh @liushuhao19960105-gif

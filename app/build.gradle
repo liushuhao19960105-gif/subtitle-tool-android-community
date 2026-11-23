@@ -1,0 +1,23 @@
+plugins { id 'com.android.application' }
+
+// Community builds are intentionally unsigned by the maintainer's persistent key.
+// Only Android's ordinary, ephemeral local/CI debug signing is permitted.
+android {
+    namespace 'com.subtitletool.standalone'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.subtitletool.standalone'
+        minSdk 26
+        targetSdk 33
+        versionCode 14
+        versionName '1.8.3-review-community'
+    }
+    buildTypes {
+        debug { }
+        release { minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
