@@ -55,6 +55,9 @@ class TranslationCheckpoint {
 class UsageLedger {
  void record(JSONObject response) {}
 }
+class DialogueLexicon {
+ org.json.JSONArray hints(java.util.List<SubtitleData.Cue> cues,int start,int end){return new org.json.JSONArray();}
+}
 enum TranslationMode {QUICK,STANDARD,HIGH}
 
 '''
