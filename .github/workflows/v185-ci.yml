@@ -1,0 +1,32 @@
+name: V1.8.5 Staged Community Checks
+on:
+  push:
+    branches: [feature/v185-quality-checks]
+  pull_request:
+    branches: [feature/v184-resume-translation]
+permissions:
+  contents: read
+jobs:
+  quality-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Install Android SDK 35
+        run: |
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Offline tests including executable V1.8.5 JVM checks
+        run: python3 -m unittest discover -s tests -v
+      - name: Build staged community debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify staged debug APK
+        run: "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
