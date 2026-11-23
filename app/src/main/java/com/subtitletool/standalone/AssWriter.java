@@ -159,7 +159,7 @@ public final class AssWriter {
             if("，。！？；、,;!?".indexOf(left)>=0)score-=24;
             else if(left==' ' || left=='：')score-=9;
             if("（([【".indexOf(left)>=0)score+=20;
-            if("的了着过得地".indexOf(right)>=0 && i+3>txt.length())score+=14;
+            if("的了着过得地".indexOf(right)>=0)score+=12; // Avoid lonely particles at the next line start.
             if(score<bestScore){bestScore=score;best=i;}
         }
         return best<0?txt:txt.substring(0,best).trim()+"\\N"+txt.substring(best).trim();
