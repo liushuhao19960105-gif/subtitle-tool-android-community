@@ -804,7 +804,7 @@ public final class MainActivity extends Activity {
                 TranslationCheckpoint checkpoint=TranslationCheckpoint.load(this,sourceIdentity,configIdentity);
                 // An unidentifiable file must not accidentally inherit a different task's usage.
                 String job=(sourceIdentity==null?java.util.UUID.randomUUID().toString():sourceIdentity)+":"+configIdentity;
-                taskUsage=UsageLedger.open(this,job);
+                taskUsage=UsageLedger.open(this,job,checkpoint!=null);
                 pipeline=new CloudPipeline(stop);
                 pipeline.setUsageLedger(taskUsage);
                 List<SubtitleData.Cue> cues;
