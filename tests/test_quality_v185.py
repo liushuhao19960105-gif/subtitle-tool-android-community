@@ -32,11 +32,22 @@ public class TestQuality {
   items.add(cue(3,5000,6000,"This is not a complete sentence.","了。"));
   items.add(cue(4,6200,6800,"Ah","啊啊啊啊啊啊"));
   items.add(cue(5,6850,7500,"Oh","啊啊啊啊啊啊"));
+  items.add(cue(6,8200,8800,"She has already departed.","我现在马上出发"));
+  items.add(cue(7,8900,9400,"They are leaving already.","我现在马上出发"));
+  items.add(cue(8,9600,9900,"Panting.","（喘息）……（呻吟）"));
+  items.add(cue(9,10000,10300,"Gasping.","（喘息）……（呻吟）"));
   SubtitleQuality.Report report=SubtitleQuality.inspect(items);
   ok(report.findings.size()>=2,"expected reading speed and orphan particle warnings");
   ok(!report.summary().contains("API"),"reports must not expose credentials");
   for(SubtitleQuality.Finding issue:report.findings)
       ok(issue.cueId!=5,"real repeated vocalizations must be preserved");
+  boolean differingEnglishDuplicateFlagged=false;
+  for(SubtitleQuality.Finding issue:report.findings){
+      if(issue.cueId==7 && issue.concern.contains("相邻字幕译文相同"))differingEnglishDuplicateFlagged=true;
+      ok(issue.cueId!=9 || !issue.concern.contains("相邻字幕译文相同"),
+          "grouped vocalizations should not be flagged as redundant");
+  }
+  ok(differingEnglishDuplicateFlagged,"distinct English lines sharing Chinese need review");
   String ass=AssWriter.render(Collections.singletonList(items.get(0)));
   ok(ass.contains("\\N"),"long Chinese sentence needs a balanced display break");
   ok(ass.contains("我们今天应该重新检查"),"original content must be retained");
