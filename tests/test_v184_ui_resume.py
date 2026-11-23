@@ -7,7 +7,7 @@ MAIN=(ROOT/"app/src/main/java/com/subtitletool/standalone/MainActivity.java").re
 class ResumeUiTests(unittest.TestCase):
     def test_header_and_selected_file_are_readable(self):
         self.assertIn('txt("视频字幕工具",22,INK,true)',MAIN)
-        self.assertIn('txt("V1.8.4",12,MUTED,false)',MAIN)
+        self.assertIn('txt("V1.9.0",12,MUTED,false)',MAIN)
         self.assertNotIn('txt("单色字幕 · V1.8"',MAIN)
         self.assertIn('selectedInfo=txt("尚未选择视频或音频",15,INK,true)',MAIN)
         self.assertIn('selectedInfo.setMaxLines(3)',MAIN)
