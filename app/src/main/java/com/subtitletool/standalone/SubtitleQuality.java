@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /** Offline, advisory checks. Never rewrites dialogue or makes paid AI requests. */
@@ -30,7 +29,7 @@ final class SubtitleQuality {
             StringBuilder out=new StringBuilder(summary());
             for(int i=0;i<findings.size() && i<limit;i++)
                 out.append("\n").append(findings.get(i));
-            if(findings.size()>limit)out.append("\n其余 ").append(findings.size()-limit).append(" 处请在字幕预览功能中复核");
+            if(findings.size()>limit)out.append("\n其余 ").append(findings.size()-limit).append(" 处可在字幕文字列表中复核");
             return out.toString();
         }
     }
@@ -83,6 +82,20 @@ final class SubtitleQuality {
                     issues.add(new Finding(c.id,"字幕显示时间较短，阅读可能困难"));
                 if(zh.matches("^[的了着过得地][。！？]?$") && c.en!=null && c.en.trim().length()>=5)
                     issues.add(new Finding(c.id,"疑似孤立助词，建议连读前后字幕"));
+                // Advisory lexical clues only; never autocorrect the model's translation.
+                // Keep voice-only cues and short context-dependent replies out of this heuristic.
+                if(!vocalOnly(zh) && c.en!=null && c.en.trim().length()>10 && zh.length()>=2){
+                    String english=" "+c.en.toLowerCase(java.util.Locale.ROOT).replace('’','\'')+" ";
+                    boolean negative=english.matches("(?s).*\\b(?:not|no|never|nothing|nobody|without|don't|doesn't|didn't|can't|cannot|won't|isn't|aren't|wasn't|weren't)\\b.*");
+                    if(negative && !zh.matches("(?s).*[不没无别未否勿莫非拒止].*")
+                       && !zh.contains("并非") && !zh.contains("才怪"))
+                        issues.add(new Finding(c.id,"英文含否定词，中文可能漏译或变更否定，请对照原文"));
+                    // Numbers often change expression (two→两), so only flag obvious Arabic
+                    // numerals with no Chinese or Arabic numeric expression at all.
+                    if(english.matches("(?s).*\\d+.*") &&
+                       !zh.matches("(?s).*[0-9零一二两三四五六七八九十百千万亿〇].*"))
+                        issues.add(new Finding(c.id,"英文包含数字，中文未见数字表达，请核对数量"));
+                }
                 if(previous!=null && c.startMs>=previous.endMs &&
                     c.startMs-previous.endMs<=1200 && zh.equals(previous.zh) &&
                     zh.length()>=6 && !vocalOnly(zh) && c.en!=null && previous.en!=null &&
