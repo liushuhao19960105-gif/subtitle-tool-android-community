@@ -139,17 +139,30 @@ public final class AssWriter {
         return raw.replace("\\","／").replace("{","（").replace("}","）")
                   .replace("\r"," ").replace("\n"," ").trim();
     }
+    /** V1.8.5: prefer punctuation and natural Chinese boundaries without changing cue timing. */
     private static String wrap(String txt) {
-        if(txt.length()<=25)return txt;
-        int pivot=-1,scoreBest=Integer.MAX_VALUE;
-        for(int i=10;i<txt.length()-9;i++){
-            if("，。！？；、,;!? ".indexOf(txt.charAt(i))<0)continue;
-            int left=i+1,right=txt.length()-left;
-            if(left>29 || right>29)continue;
-            int score=Math.abs(left-right)+(left<12?7:0)+(right<12?7:0);
-            if(score<scoreBest){pivot=left;scoreBest=score;}
+        if(txt.length()<=25 || txt.contains("\\N"))return txt;
+        // Two lines of at most 29 visible characters. Oversized cues remain unchanged,
+        // and are flagged by SubtitleQuality rather than silently dropping content.
+        int low=Math.max(9,txt.length()-29),high=Math.min(29,txt.length()-9);
+        if(low>high)return txt;
+        int best=-1,bestScore=Integer.MAX_VALUE;
+        for(int i=low;i<=high;i++){
+            char left=txt.charAt(i-1),right=txt.charAt(i);
+            // Keep ASCII words and numbers intact. Never put punctuation at line start.
+            if(left<128 && right<128 &&
+                (Character.isLetterOrDigit(left) && Character.isLetterOrDigit(right)))continue;
+            if("，。！？；、,.;!?：:)]}）】".indexOf(right)>=0)continue;
+            if(i+1>=txt.length())continue;
+            int balance=Math.abs(i-(txt.length()-i));
+            int score=balance*3;
+            if("，。！？；、,;!?".indexOf(left)>=0)score-=24;
+            else if(left==' ' || left=='：')score-=9;
+            if("（([【".indexOf(left)>=0)score+=20;
+            if("的了着过得地".indexOf(right)>=0 && i+3>txt.length())score+=14;
+            if(score<bestScore){bestScore=score;best=i;}
         }
-        return pivot<0?txt:txt.substring(0,pivot).trim()+"\\N"+txt.substring(pivot).trim();
+        return best<0?txt:txt.substring(0,best).trim()+"\\N"+txt.substring(best).trim();
     }
     private static String time(long milli) {
         long cs=Math.max(0,milli/10);
