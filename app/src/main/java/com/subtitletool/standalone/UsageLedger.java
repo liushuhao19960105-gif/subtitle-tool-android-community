@@ -23,10 +23,10 @@ final class UsageLedger {
     private UsageLedger(Context context,String job){
         this.context=context;this.job=job;
     }
-    static UsageLedger open(Context context,String job){
+    static UsageLedger open(Context context,String job,boolean resume){
         UsageLedger item=new UsageLedger(context,job);
         File file=new File(context.getFilesDir(),FILENAME);
-        if(file.isFile() && file.length()>4 && file.length()<LIMIT){
+        if(resume && file.isFile() && file.length()>4 && file.length()<LIMIT){
             try {
                 JSONObject data=new JSONObject(new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8));
                 if(data.optInt("version")==1 && job.equals(data.optString("job"))){
