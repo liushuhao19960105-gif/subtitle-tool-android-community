@@ -44,6 +44,15 @@ class EditorV190Tests(unittest.TestCase):
                         ACTIVITY.index('Toast.makeText(this,"字幕已保存'))
         self.assertIn('if(current.size()>=60)break;',ACTIVITY)
 
+    def test_editor_recovers_interrupted_ass_write(self):
+        self.assertIn("SubtitleDraftStore.ensureAssMatchesDraft(this,loaded)",ACTIVITY)
+        self.assertIn("static boolean ensureAssMatchesDraft(",DRAFT)
+        self.assertIn("Arrays.equals(Files.readAllBytes(target.toPath()),expected)",DRAFT)
+        self.assertIn("writeAss(context,cues);",DRAFT)
+        self.assertLess(MAIN.index("SubtitleDraftStore.clear(this);"),
+                        MAIN.index('File target=new File(getFilesDir(),"last_result.ass");',
+                                   MAIN.index("String ass=AssWriter.render(cues);")))
+
     def test_entry_point_and_export_continuity(self):
         self.assertIn('quietBtn("字幕预览与编辑")',MAIN)
         self.assertIn("SubtitleDraftStore.clear(this);",MAIN)
