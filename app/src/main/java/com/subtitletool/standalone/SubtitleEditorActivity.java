@@ -28,6 +28,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** V1.9.0: private, local cue preview and manual Chinese edit. No server calls. */
 public final class SubtitleEditorActivity extends Activity {
@@ -39,6 +41,7 @@ public final class SubtitleEditorActivity extends Activity {
     private ArrayAdapter<String> adapter;
     private ListView list;
     private TextView summary;
+    private Button issuesButton;
     private boolean saving=false;
 
     private int dp(int value){return (int)(value*getResources().getDisplayMetrics().density+.5f);}
@@ -73,6 +76,13 @@ public final class SubtitleEditorActivity extends Activity {
         LinearLayout.LayoutParams summaryLp=new LinearLayout.LayoutParams(-1,-2);
         summaryLp.topMargin=dp(10);summaryLp.bottomMargin=dp(12);
         root.addView(summary,summaryLp);
+        issuesButton=new Button(this);
+        issuesButton.setAllCaps(false);
+        issuesButton.setTextSize(14);issuesButton.setTextColor(GREEN);
+        issuesButton.setText("查看需复核字幕");
+        issuesButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams issuesLp=new LinearLayout.LayoutParams(-1,dp(44));
+        issuesLp.bottomMargin=dp(9);root.addView(issuesButton,issuesLp);
         list=new ListView(this);
         list.setBackgroundColor(WHITE);
         list.setDividerHeight(dp(1));
@@ -110,6 +120,7 @@ public final class SubtitleEditorActivity extends Activity {
                     for(SubtitleData.Cue cue:cues)rows.add(rowText(cue));
                     adapter.notifyDataSetChanged();
                     summary.setText("共 "+cues.size()+" 条 · 点击任意字幕修改中文。英文和时间码保持不变。");
+                    refreshProblemNavigator();
                 });
             }catch(Exception e){
                 main.post(()->{
@@ -119,6 +130,56 @@ public final class SubtitleEditorActivity extends Activity {
             }
         },"load-subtitle-editor").start();
     }
+    /** Help non-technical users jump straight from a quality hint to its subtitle. */
+    private void refreshProblemNavigator(){
+        if(issuesButton==null || cues==null || saving)return;
+        LinkedHashMap<Integer,String> issueByCue=new LinkedHashMap<>();
+        for(SubtitleQuality.Finding finding:SubtitleQuality.inspect(cues).findings)
+            if(!issueByCue.containsKey(finding.cueId))
+                issueByCue.put(finding.cueId,finding.concern);
+        if(issueByCue.isEmpty()){
+            issuesButton.setVisibility(View.GONE);
+            return;
+        }
+        issuesButton.setText("查看需复核字幕（"+issueByCue.size()+" 条）");
+        issuesButton.setVisibility(View.VISIBLE);
+        issuesButton.setOnClickListener(v->{
+            if(saving || cues==null)return;
+            LinkedHashMap<Integer,String> current=new LinkedHashMap<>();
+            for(SubtitleQuality.Finding finding:SubtitleQuality.inspect(cues).findings){
+                if(!current.containsKey(finding.cueId))current.put(finding.cueId,finding.concern);
+                if(current.size()>=60)break;
+            }
+            if(current.isEmpty()){refreshProblemNavigator();return;}
+            final ArrayList<Integer> ids=new ArrayList<>(current.keySet());
+            String[] labels=new String[ids.size()];
+            for(int i=0;i<ids.size();i++)
+                labels[i]="第 "+ids.get(i)+" 条 · "+current.get(ids.get(i));
+            new AlertDialog.Builder(this)
+                .setTitle("选择要复核的字幕"+(issueByCue.size()>60?"（前60条）":""))
+                .setItems(labels,(dialog,which)->{
+                    if(saving)return;
+                    int targetId=ids.get(which);
+                    for(int i=0;i<cues.size();i++){
+                        if(cues.get(i).id==targetId){
+                            list.setSelection(i);
+                            edit(i);
+                            break;
+                        }
+                    }
+                })
+                .setNegativeButton("关闭",null)
+                .show();
+        });
+    }
+    @Override public void onBackPressed(){
+        if(saving){
+            Toast.makeText(this,"字幕正在保存，请完成后返回",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        super.onBackPressed();
+    }
+
     private void edit(int index){
         final SubtitleData.Cue cue=cues.get(index);
         LinearLayout panel=new LinearLayout(this);
@@ -164,6 +225,7 @@ public final class SubtitleEditorActivity extends Activity {
                         main.post(()->{
                             rows.set(index,rowText(cue));
                             adapter.notifyDataSetChanged();
+                            refreshProblemNavigator();
                             saving=false;
                             dialog.dismiss();
                             Toast.makeText(this,"字幕已保存，ASS 已同步更新",Toast.LENGTH_SHORT).show();
