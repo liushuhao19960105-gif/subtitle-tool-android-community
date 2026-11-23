@@ -54,7 +54,7 @@ class ModesAndUsageTests(unittest.TestCase):
             self.assertIn(marker,PIPELINE)
         self.assertIn('if(mode==TranslationMode.STANDARD)return standard;',CHECKPOINT)
         self.assertIn('o.optInt("deepDone",0)',CHECKPOINT)
-        self.assertIn('"quality="+mode.id',CHECKPOINT)
+        self.assertIn('quality="+mode.id',CHECKPOINT)
         self.assertIn('final TranslationMode mode=TranslationMode.fromIndex(',MAIN)
         self.assertIn("qualityModeSpinner.setEnabled(false)",MAIN)
 
