@@ -39,7 +39,7 @@ class ResumeV184Tests(unittest.TestCase):
     def test_only_completed_batches_are_skipped(self):
         self.assertIn("n<checkpoint.firstDone",self.pipeline)
         self.assertIn("n<checkpoint.reviewDone",self.pipeline)
-        first=self.pipeline.index("Map<Integer,String> finalMapping=parseMapping")
+        first=self.pipeline.index("finalMapping=parseMapping(polished,cues,from,to)")
         firstsave=self.pipeline.index("checkpoint.firstDone=n+1")
         review=self.pipeline.index("Map<Integer,String> reviewed=parseMapping")
         reviewsave=self.pipeline.index("checkpoint.reviewDone=n+1")
@@ -60,7 +60,7 @@ class ResumeV184Tests(unittest.TestCase):
         self.assertLess(self.main.index("TranslationCheckpoint.load(this,sourceIdentity,configIdentity)"),
                         self.main.index("AudioExtractor.extract(this,uri,work,stop,"))
         self.assertIn("checkpoint=TranslationCheckpoint.fresh",self.main)
-        self.assertIn("pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this)",self.main)
+        self.assertIn("pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this,mode)",self.main)
         self.assertIn('TranslationCheckpoint.clear(this);',self.main)
         self.assertIn('quietBtn("清除进度")',self.main)
 
