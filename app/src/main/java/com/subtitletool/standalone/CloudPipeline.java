@@ -24,6 +24,8 @@ public final class CloudPipeline {
     private final AtomicBoolean cancel;
     private volatile HttpURLConnection active;
     private volatile UsageLedger usageLedger;
+    private volatile DialogueLexicon dialogueLexicon;
+    void setDialogueLexicon(DialogueLexicon glossary){this.dialogueLexicon=glossary;}
     void setUsageLedger(UsageLedger usageLedger){this.usageLedger=usageLedger;}
     private static final class RateLimitException extends IOException {
         final int waitSeconds;
@@ -132,6 +134,10 @@ public final class CloudPipeline {
         if(start<0 || end<=start) throw new IOException("模型输出不是有效 JSON");
         return new JSONObject(text.substring(start,end+1));
     }
+    private void addDialogueHints(JSONObject input,List<SubtitleData.Cue> cues,int from,int to)throws Exception {
+        DialogueLexicon glossary=dialogueLexicon;
+        if(glossary!=null)input.put("dialogue_lexicon_hints",glossary.hints(cues,from,to));
+    }
     private static JSONArray requestMessages(String system,JSONObject input) throws Exception {
         JSONArray a=new JSONArray();
         a.put(new JSONObject().put("role","system").put("content",system));
@@ -141,6 +147,7 @@ public final class CloudPipeline {
     private static final String TRANSLATE_SYSTEM=
         "你是影视英语对白到简体中文的专业字幕译者。重点是让一整句中文自然、顺畅、连贯，而不是独立翻译每一条英语碎片。"+
         "先通读 target、sentence_groups、前后相邻英文和 previous_chinese，分清人物关系、说话者、语气、问句和否定。"+
+        "dialogue_lexicon_hints 是可维护词库提供的多义词参考，不是替换规则，也不是对音频场景的证明；只有在 target 英文及实际上下文匹配时才参考，不得强制选用其建议译词。"+
         "sentence_groups 仅帮助理解跨多条字幕的同一英文句子，其 ids 仍属于 target；不要把不同说话者的对白合并。"+
         "同一句可以在相邻且属于同一说话者的 ID 之间自然重新分配，但整句话只能翻译一次，不可重复、漏译、交换发言者。"+
         "注意译文跨条拼接后必须是通顺的中文；不要留下单独的‘了。’‘的’‘着’，也不要半句重复下一条。"+
@@ -164,6 +171,7 @@ public final class CloudPipeline {
     private static final String POLISH_SYSTEM=
         "你是中文影视字幕终审，任务是跨条整句润色而不是机械逐条润色。"+
         "结合英文、sentence_groups、邻近上下文和初译 draft，检查每组中文按时间顺序连起来是否自然、是否重复和是否漏掉否定问句。"+
+        "dialogue_lexicon_hints 仅提供多义词语境提醒，不是固定译法；依 target 英文、初译和场景对照，避免误译和过度净化。"+
         "重点修正中文断裂，如‘交往 / 也有一小段时间了’、孤立助词、突然的代词转移与口语不自然。"+
         "重点复核双关词与成人俚语的上下文义：fuck、shit、bitch、dick、pussy、come/cum、hard、nasty 等既可能是粗口也可能是其他词义；不能仅凭单词推断性行为。"+
         "核对初译是否无端把露骨粗话洗成文雅话、把普通话翻成色情台词、弄错褒贬强弱、动作对象或主语；在不增删事实的前提下改成简洁地道的中文字幕。"+
@@ -179,6 +187,7 @@ public final class CloudPipeline {
     private static final String REVIEW_SYSTEM=
         "你是简体中文影视字幕质量校验员。输入为已完成初译和润色的字幕，任务是终审核对英文原文和前后已翻译的中文，纠正跨字幕、跨批次的不连贯问题。"+
         "按时间顺序连读 previous_chinese、target 和 next_chinese，检查人物称呼、代词指向、问答衔接、语气延续、故事逻辑、前后用词和句式一致性。"+
+        "dialogue_lexicon_hints 是提示性上下文词库，不是字幕文本替换命令，不能凭词条编造成人行为或删除发声。"+
         "逐条对照 target 的 en 及 sentence_groups，核验否定、时态、命令、数字、重复发声、漏译、错译；译文要符合中国人观看影视字幕的习惯，精炼、自然、易于一眼读懂，不使用生硬翻译腔。"+
         "英文俚语、粗口、性暗示及成人对白按具体语境译，保留原意、褒贬和粗俗程度；不能审查式净化已识别的内容，也不可把普通词汇误改成性行为或凭想象增加色情台词。"+
         "已识别出的 Ah、Oh、Mm、Uh、惊喘及声音事件不得删除；不同人的对白不能混合或改换说话者；保留人名、品牌原文和术语一致性。"+
@@ -208,6 +217,7 @@ public final class CloudPipeline {
             int from=ranges.get(n)[0],to=ranges.get(n)[1];
             JSONObject input=new JSONObject();
             input.put("target",toArray(cues,from,to,true));
+            addDialogueHints(input,cues,from,to);
             input.put("sentence_groups",sentenceGroups(cues,from,to));
             input.put("previous_english",toArray(cues,Math.max(0,from-6),from,false));
             input.put("next_english",toArray(cues,to,Math.min(cues.size(),to+6),false));
@@ -263,6 +273,7 @@ public final class CloudPipeline {
                 int from=reviewRanges.get(n)[0],to=reviewRanges.get(n)[1];
                 JSONObject input=new JSONObject();
                 input.put("target",toArray(cues,from,to,true));
+                addDialogueHints(input,cues,from,to);
                 input.put("sentence_groups",sentenceGroups(cues,from,to));
                 input.put("previous_chinese",toArray(cues,Math.max(0,from-8),from,true));
                 input.put("next_chinese",toArray(cues,to,Math.min(cues.size(),to+8),true));
