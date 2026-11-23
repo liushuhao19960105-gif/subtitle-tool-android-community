@@ -779,6 +779,9 @@ public final class MainActivity extends Activity {
                 SubtitleQuality.Report quality=SubtitleQuality.inspect(cues);
                 String qualityText=quality.firstDetails(30);
                 String ass=AssWriter.render(cues);
+                // Invalidate the previous edit draft BEFORE replacing its ASS file.
+                // An unexpected exit must never pair an older draft with new output.
+                SubtitleDraftStore.clear(this);
                 File target=new File(getFilesDir(),"last_result.ass");
                 File tmp=new File(getFilesDir(),"last_result.ass.tmp");
                 try(FileOutputStream out=new FileOutputStream(tmp)){
@@ -792,8 +795,7 @@ public final class MainActivity extends Activity {
                     tmp.delete();
                 }
                 completedAss=target;outputName=requestedName;
-                // The editable snapshot mirrors the newly persisted ASS; fail closed on stale data.
-                SubtitleDraftStore.clear(this);
+                // The editable snapshot mirrors the newly persisted ASS.
                 try { SubtitleDraftStore.save(this,cues); }
                 catch(Exception ignored){/* ASS remains downloadable even without editor data. */}
                 // Keep checkpoint until the final subtitle was actually persisted.
