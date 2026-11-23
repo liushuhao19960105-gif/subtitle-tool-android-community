@@ -807,6 +807,11 @@ public final class MainActivity extends Activity {
                 taskUsage=UsageLedger.open(this,job,checkpoint!=null);
                 pipeline=new CloudPipeline(stop);
                 pipeline.setUsageLedger(taskUsage);
+                // Load the curated dialogue lexicon once; only relevant hints go into requests.
+                try(java.io.InputStreamReader reader=new java.io.InputStreamReader(
+                        getAssets().open("dialogue_lexicon_v191.tsv"),StandardCharsets.UTF_8)){
+                    pipeline.setDialogueLexicon(DialogueLexicon.load(reader));
+                }
                 List<SubtitleData.Cue> cues;
                 if(checkpoint!=null) {
                     cues=checkpoint.cues;
