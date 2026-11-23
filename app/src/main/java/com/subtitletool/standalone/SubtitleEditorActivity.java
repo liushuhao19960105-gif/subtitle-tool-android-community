@@ -114,6 +114,7 @@ public final class SubtitleEditorActivity extends Activity {
         new Thread(()->{
             try {
                 List<SubtitleData.Cue> loaded=SubtitleDraftStore.load(this);
+                SubtitleDraftStore.ensureAssMatchesDraft(this,loaded);
                 main.post(()->{
                     cues=loaded;
                     for(SubtitleData.Cue cue:cues)rows.add(rowText(cue));
