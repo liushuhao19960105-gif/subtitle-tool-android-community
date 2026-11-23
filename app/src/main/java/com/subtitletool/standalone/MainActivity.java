@@ -266,7 +266,7 @@ public final class MainActivity extends Activity {
         ImageView logo=new ImageView(this);logo.setImageResource(R.mipmap.ic_launcher);
         header.addView(logo,new LinearLayout.LayoutParams(dp(43),dp(43)));
         LinearLayout head=vertical();head.setPadding(dp(11),0,0,0);
-        add(head,txt("视频字幕工具",22,INK,true));add(head,txt("V1.8.4",12,MUTED,false));
+        add(head,txt("视频字幕工具",22,INK,true));add(head,txt("V1.9.0",12,MUTED,false));
         header.addView(head);add(root,header);
 
         gap(root,19);
