@@ -191,12 +191,15 @@ public final class CloudPipeline {
         StringBuilder previousSummary=new StringBuilder();
         for(int n=0;n<batches;n++) {
             check();
+            if(checkpoint!=null && n<checkpoint.firstDone)continue;
             int from=ranges.get(n)[0],to=ranges.get(n)[1];
             JSONObject input=new JSONObject();
             input.put("target",toArray(cues,from,to,true));
             input.put("sentence_groups",sentenceGroups(cues,from,to));
             input.put("previous_english",toArray(cues,Math.max(0,from-6),from,false));
             input.put("next_english",toArray(cues,to,Math.min(cues.size(),to+6),false));
+            previousSummary.setLength(0);
+            for(int i=Math.max(0,from-7);i<from;i++)previousSummary.append(cues.get(i).zh).append(' ');
             input.put("previous_chinese",previousSummary.toString());
             cb.update(39+(int)(50.0*n/Math.max(1,batches)),"正在翻译第 "+(n+1)+"/"+batches+" 组…");
             JSONObject translated=chat(key,model,endpoint,requestMessages(TRANSLATE_SYSTEM,input));
@@ -208,6 +211,10 @@ public final class CloudPipeline {
             Map<Integer,String> finalMapping=parseMapping(polished,cues,from,to);
             // Make final atomic only when all returned IDs pass validation.
             for(int i=from;i<to;i++) cues.get(i).zh=finalMapping.get(cues.get(i).id);
+            if(checkpoint!=null && context!=null) {
+                checkpoint.firstDone=n+1;
+                checkpoint.save(context);
+            }
             previousSummary.setLength(0);
             for(int i=Math.max(0,to-7);i<to;i++) previousSummary.append(cues.get(i).zh).append(' ');
         }
@@ -215,6 +222,7 @@ public final class CloudPipeline {
         final List<int[]> reviewRanges=batchRanges(cues,20);
         for(int n=0;n<reviewRanges.size();n++) {
             check();
+            if(checkpoint!=null && n<checkpoint.reviewDone)continue;
             int from=reviewRanges.get(n)[0],to=reviewRanges.get(n)[1];
             JSONObject input=new JSONObject();
             input.put("target",toArray(cues,from,to,true));
@@ -227,8 +235,27 @@ public final class CloudPipeline {
             Map<Integer,String> reviewed=parseMapping(checked,cues,from,to);
             // Apply only after the complete batch passed the existing strict ID and nonempty checks.
             for(int i=from;i<to;i++) cues.get(i).zh=reviewed.get(cues.get(i).id);
+            if(checkpoint!=null && context!=null) {
+                checkpoint.reviewDone=n+1;
+                checkpoint.save(context);
+            }
         }
         check();cb.update(94,"字幕翻译与整体校验完成，正在生成单色字幕…");
+    }
+    static int batchCount(List<SubtitleData.Cue> cues,int desired) {
+        return batchRanges(cues,desired).size();
+    }
+    static boolean hasCompletedPrefix(List<SubtitleData.Cue> cues,int desired,int completed) {
+        List<int[]> ranges=batchRanges(cues,desired);
+        if(completed<0 || completed>ranges.size())return false;
+        for(int n=0;n<completed;n++) {
+            int[] range=ranges.get(n);
+            for(int i=range[0];i<range[1];i++) {
+                String zh=cues.get(i).zh;
+                if(zh==null || zh.trim().isEmpty() || zh.length()>250)return false;
+            }
+        }
+        return true;
     }
     /** Prefer breaking requests at a speaker change, pause or English sentence boundary. */
     private static List<int[]> batchRanges(List<SubtitleData.Cue> cues,int desired) {
