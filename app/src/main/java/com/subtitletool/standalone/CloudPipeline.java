@@ -23,6 +23,8 @@ public final class CloudPipeline {
     public interface Callback { void update(int percent, String label); }
     private final AtomicBoolean cancel;
     private volatile HttpURLConnection active;
+    private volatile UsageLedger usageLedger;
+    void setUsageLedger(UsageLedger usageLedger){this.usageLedger=usageLedger;}
     private static final class RateLimitException extends IOException {
         final int waitSeconds;
         RateLimitException(int seconds){super("API 请求频率受限（HTTP 429）");waitSeconds=seconds;}
@@ -116,6 +118,9 @@ public final class CloudPipeline {
         JSONObject body=new JSONObject();body.put("model",model);body.put("messages",messages);body.put("stream",false);
         JSONObject response=post(endpoint,key,"Bearer","application/json",
                 body.toString().getBytes(StandardCharsets.UTF_8),null,150000);
+        // Count only token totals explicitly reported by the provider; preserve them on every response.
+        UsageLedger ledger=usageLedger;
+        if(ledger!=null)ledger.record(response);
         JSONArray choices=response.optJSONArray("choices");
         if(choices==null || choices.length()==0) throw new IOException("模型没有返回翻译结果");
         JSONObject choice=choices.getJSONObject(0);
@@ -141,6 +146,8 @@ public final class CloudPipeline {
         "注意译文跨条拼接后必须是通顺的中文；不要留下单独的‘了。’‘的’‘着’，也不要半句重复下一条。"+
         "口语要自然，保留原意中的否定、疑问、语气与情绪；遇到明显可疑的英文识别不能擅自编造原声不存在的内容。"+
         "特别处理英语俚语、粗口、性暗示和成人对白：先结合整句、人物关系和相邻语境判断词义，再译成中国观众听得懂的自然口语；不要逐词硬译、书面化净化或一律译为同一个脏字。"+
+        "歧义测试优先：get off the bus 是下车、get off on something 才可能表示性兴奋；go down the stairs 是下楼；screw up 是搞砸，不等于性行为。"+
+        "daddy 在家庭对话中是爸爸；good girl 在鼓励或称赞中可能只是乖孩子/做得好；barely、hard、come、nasty 等以句意和人物关系决定，不一律解释成成人词义。"+
         "保留原话的粗俗程度、攻击性、调情意味、主谓对象及命令语气；原文明显露骨时可直接使用准确的中文粗话或性词汇，不用含糊委婉词代替；原文不露骨时绝不额外色情化。"+
         "fuck、fucking、shit、bitch、ass、dick、cock、pussy、balls、screw、nasty、hard、come/cum、get off、go down、turn on、eat out 等均可能多义；必须区分感叹、骂人、形容、字面动作与具体性含义。"+
         "例如 Fuck! 可依情绪译为‘操！’或‘靠！’，fucking good 是加强语气而非性动作；come here 是‘过来’，只有明确性语境中的 cum/come 才译作‘高潮/射精’等相符含义；hard 也可能只是‘困难/坚硬’。"+
@@ -183,6 +190,12 @@ public final class CloudPipeline {
     }
     public void translateAndPolish(List<SubtitleData.Cue> cues,String key,String endpoint,String model,
                                    Callback cb,TranslationCheckpoint checkpoint,android.content.Context context)throws Exception {
+        translateAndPolish(cues,key,endpoint,model,cb,checkpoint,context,TranslationMode.STANDARD);
+    }
+    public void translateAndPolish(List<SubtitleData.Cue> cues,String key,String endpoint,String model,
+                                   Callback cb,TranslationCheckpoint checkpoint,android.content.Context context,
+                                   TranslationMode mode)throws Exception {
+        if(mode==null)mode=TranslationMode.STANDARD;
         endpoint=ProviderPresets.normalizeEndpoint(endpoint);
         if(key==null || key.trim().isEmpty()) throw new IllegalArgumentException("请先保存翻译服务商的 API Key");
         if(model==null || model.trim().isEmpty()) throw new IllegalArgumentException("请填写翻译模型 ID");
@@ -204,11 +217,14 @@ public final class CloudPipeline {
             cb.update(39+(int)(50.0*n/Math.max(1,batches)),"正在翻译第 "+(n+1)+"/"+batches+" 组…");
             JSONObject translated=chat(key,model,endpoint,requestMessages(TRANSLATE_SYSTEM,input));
             Map<Integer,String> mapping=parseMapping(translated,cues,from,to);
-            JSONObject polish=new JSONObject(input.toString());
-            polish.put("draft",mappingJson(mapping,cues,from,to));
-            cb.update(39+(int)(50.0*(n+.5)/Math.max(1,batches)),"正在同模型润色第 "+(n+1)+"/"+batches+" 组…");
-            JSONObject polished=chat(key,model,endpoint,requestMessages(POLISH_SYSTEM,polish));
-            Map<Integer,String> finalMapping=parseMapping(polished,cues,from,to);
+            Map<Integer,String> finalMapping=mapping;
+            if(mode!=TranslationMode.QUICK){
+                JSONObject polish=new JSONObject(input.toString());
+                polish.put("draft",mappingJson(mapping,cues,from,to));
+                cb.update(39+(int)(50.0*(n+.5)/Math.max(1,batches)),"正在同模型润色第 "+(n+1)+"/"+batches+" 组…");
+                JSONObject polished=chat(key,model,endpoint,requestMessages(POLISH_SYSTEM,polish));
+                finalMapping=parseMapping(polished,cues,from,to);
+            }
             // Make final atomic only when all returned IDs pass validation.
             for(int i=from;i<to;i++) cues.get(i).zh=finalMapping.get(cues.get(i).id);
             if(checkpoint!=null && context!=null) {
@@ -218,9 +234,9 @@ public final class CloudPipeline {
             previousSummary.setLength(0);
             for(int i=Math.max(0,to-7);i<to;i++) previousSummary.append(cues.get(i).zh).append(' ');
         }
-        // Review after translation of the whole video, not independently inside each first-pass batch.
+        // Quick runs one pass; standard runs translation+polish+review; high runs four.
         final List<int[]> reviewRanges=batchRanges(cues,20);
-        for(int n=0;n<reviewRanges.size();n++) {
+        if(mode!=TranslationMode.QUICK)for(int n=0;n<reviewRanges.size();n++) {
             check();
             if(checkpoint!=null && n<checkpoint.reviewDone)continue;
             int from=reviewRanges.get(n)[0],to=reviewRanges.get(n)[1];
@@ -240,7 +256,31 @@ public final class CloudPipeline {
                 checkpoint.save(context);
             }
         }
-        check();cb.update(94,"字幕翻译与整体校验完成，正在生成单色字幕…");
+        if(mode==TranslationMode.HIGH){
+            for(int n=0;n<reviewRanges.size();n++){
+                check();
+                if(checkpoint!=null && n<checkpoint.deepDone)continue;
+                int from=reviewRanges.get(n)[0],to=reviewRanges.get(n)[1];
+                JSONObject input=new JSONObject();
+                input.put("target",toArray(cues,from,to,true));
+                input.put("sentence_groups",sentenceGroups(cues,from,to));
+                input.put("previous_chinese",toArray(cues,Math.max(0,from-8),from,true));
+                input.put("next_chinese",toArray(cues,to,Math.min(cues.size(),to+8),true));
+                input.put("focus","复核否定、数量、同一说话人、俚语歧义、连续发声；无错误则原样返回");
+                cb.update(94+(int)(3.0*n/Math.max(1,reviewRanges.size())),
+                    "高质量模式：精细复核第 "+(n+1)+"/"+reviewRanges.size()+" 组…");
+                JSONObject checked=chat(key,model,endpoint,requestMessages(
+                    REVIEW_SYSTEM+"特别注意不要为润色而改写原本正确的句子；真实粗口和人声仍需原样保留。",input));
+                Map<Integer,String> reviewed=parseMapping(checked,cues,from,to);
+                for(int i=from;i<to;i++)cues.get(i).zh=reviewed.get(cues.get(i).id);
+                if(checkpoint!=null && context!=null){
+                    checkpoint.deepDone=n+1;
+                    checkpoint.save(context);
+                }
+            }
+        }
+        check();cb.update(97,mode==TranslationMode.QUICK?
+            "快速翻译完成，正在整理字幕…" : "字幕翻译与校验完成，正在整理字幕…");
     }
     static int batchCount(List<SubtitleData.Cue> cues,int desired) {
         return batchRanges(cues,desired).size();
