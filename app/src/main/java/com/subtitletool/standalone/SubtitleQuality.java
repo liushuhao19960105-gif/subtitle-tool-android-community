@@ -87,7 +87,7 @@ final class SubtitleQuality {
                 if(!vocalOnly(zh) && c.en!=null && c.en.trim().length()>10 && zh.length()>=2){
                     String english=" "+c.en.toLowerCase(java.util.Locale.ROOT).replace('’','\'')+" ";
                     boolean negative=english.matches("(?s).*\\b(?:not|no|never|nothing|nobody|without|don't|doesn't|didn't|can't|cannot|won't|isn't|aren't|wasn't|weren't)\\b.*");
-                    if(negative && !zh.matches("(?s).*[不没无别未否勿莫非难免拒止假\\u5426].*")
+                    if(negative && !zh.matches("(?s).*[不没无别未否勿莫非拒止].*")
                        && !zh.contains("并非") && !zh.contains("才怪"))
                         issues.add(new Finding(c.id,"英文含否定词，中文可能漏译或变更否定，请对照原文"));
                     // Numbers often change expression (two→两), so only flag obvious Arabic
