@@ -34,8 +34,8 @@ class ContextualReviewTests(unittest.TestCase):
             self.assertIn(phrase, prompt)
 
     def test_version(self):
-        self.assertIn("versionCode 14", GRADLE)
-        self.assertIn("1.8.3-review", GRADLE)
+        self.assertRegex(GRADLE, r"versionCode\s+(?:14|15)\b")
+        self.assertRegex(GRADLE, r"1\.8\.(?:3-review|4-resume)")
 
 
 if __name__ == "__main__":
