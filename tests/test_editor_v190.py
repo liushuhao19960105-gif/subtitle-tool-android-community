@@ -32,6 +32,18 @@ class EditorV190Tests(unittest.TestCase):
         self.assertNotIn("getExternalStorage",DRAFT)
         self.assertNotIn("SUBTITLE_SIGNING_",DRAFT)
 
+    def test_quality_report_items_are_clickable_and_edits_are_safe(self):
+        for marker in ('issuesButton.setText("查看需复核字幕（"',
+                       'SubtitleQuality.inspect(cues).findings',
+                       'list.setSelection(i)', 'edit(i)',
+                       'if(saving || cues==null)return;',
+                       'if(saving){', '字幕正在保存，请完成后返回',
+                       'setItems(labels,(dialog,which)->'):
+            self.assertIn(marker,ACTIVITY)
+        self.assertLess(ACTIVITY.index('saving=false;\\n                            refreshProblemNavigator();'),
+                        ACTIVITY.index('Toast.makeText(this,"字幕已保存'))
+        self.assertIn('if(current.size()>=60)break;',ACTIVITY)
+
     def test_entry_point_and_export_continuity(self):
         self.assertIn('quietBtn("字幕预览与编辑")',MAIN)
         self.assertIn("SubtitleDraftStore.clear(this);",MAIN)
