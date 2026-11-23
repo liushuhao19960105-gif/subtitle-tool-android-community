@@ -75,7 +75,7 @@ public final class MainActivity extends Activity {
     private Spinner providerSpinner, asrSpinner;
     private TextView savedInfo, selectedInfo, status, logs;
     private ProgressBar progress;
-    private Button startBtn, stopBtn, exportBtn, logBtn, clearCheckpointBtn, qualityBtn;
+    private Button startBtn, stopBtn, exportBtn, logBtn, clearCheckpointBtn, qualityBtn, previewBtn;
     private String latestQualityReport="";
     private LinearLayout taskActionsRow, selectedFilePanel;
     private volatile int resumeCheckGeneration=0;
@@ -124,6 +124,23 @@ public final class MainActivity extends Activity {
             }catch(Exception ignored){/* Stored report is optional. */}
         }
         updateSavedInfo();
+    }
+    @Override protected void onResume(){
+        super.onResume();
+        if(previewBtn!=null){
+            boolean available=!busy && SubtitleDraftStore.exists(this) &&
+                new File(getFilesDir(),"last_result.ass").isFile();
+            previewBtn.setVisibility(available?View.VISIBLE:View.GONE);
+        }
+        if(qualityBtn!=null){
+            File report=new File(getFilesDir(),"last_quality_report.txt");
+            if(report.isFile() && report.length()<16000){
+                try{
+                    latestQualityReport=new String(Files.readAllBytes(report.toPath()),StandardCharsets.UTF_8);
+                    qualityBtn.setVisibility(View.VISIBLE);
+                }catch(Exception ignored){}
+            }
+        }
     }
     /** One-time local upgrade. Keeps an untouched backup and makes no API call. */
     private boolean upgradeSavedAss(File prior) throws Exception {
@@ -367,6 +384,15 @@ public final class MainActivity extends Activity {
         qualityBtn.setOnClickListener(v->new AlertDialog.Builder(this)
             .setTitle("字幕质量初检").setMessage(latestQualityReport)
             .setPositiveButton("知道了",null).show());
+        previewBtn=quietBtn("字幕预览与编辑");previewBtn.setVisibility(View.GONE);
+        gap(taskCard,6);add(taskCard,previewBtn);
+        previewBtn.setOnClickListener(v->{
+            if(busy)return;
+            if(!SubtitleDraftStore.exists(this)){
+                status.setText("请先完成一次字幕制作，再进行预览和编辑");return;
+            }
+            startActivity(new Intent(this,SubtitleEditorActivity.class));
+        });
         gap(taskCard,10);
         logBtn=quietBtn("运行日志  ▾");add(taskCard,logBtn);
         logs=txt("",12,MUTED,false);logs.setPadding(dp(9),dp(10),dp(9),dp(10));
@@ -712,6 +738,7 @@ public final class MainActivity extends Activity {
         modelName.setEnabled(false);asrKey.setEnabled(false);modelKey.setEnabled(false);
         apiEndpoint.setEnabled(false);saveBtn.setEnabled(false);settingsToggle.setEnabled(false);
         exportBtn.setVisibility(View.GONE);
+        previewBtn.setVisibility(View.GONE);
         progress.setProgress(0);logs.setText("");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         Thread worker=new Thread(()->{
@@ -765,6 +792,10 @@ public final class MainActivity extends Activity {
                     tmp.delete();
                 }
                 completedAss=target;outputName=requestedName;
+                // The editable snapshot mirrors the newly persisted ASS; fail closed on stale data.
+                SubtitleDraftStore.clear(this);
+                try { SubtitleDraftStore.save(this,cues); }
+                catch(Exception ignored){/* ASS remains downloadable even without editor data. */}
                 // Keep checkpoint until the final subtitle was actually persisted.
                 if(checkpoint!=null)TranslationCheckpoint.clear(this);
                 prefs.edit().putString("last_file",outputName).apply();
@@ -794,6 +825,8 @@ public final class MainActivity extends Activity {
                     apiEndpoint.setEnabled(ProviderPresets.byIndex(activeProviderIndex).custom);
                     saveBtn.setEnabled(true);settingsToggle.setEnabled(true);
                     if(completedAss!=null && completedAss.isFile())exportBtn.setVisibility(View.VISIBLE);
+                    previewBtn.setVisibility(SubtitleDraftStore.exists(this) &&
+                        completedAss!=null && completedAss.isFile()?View.VISIBLE:View.GONE);
                     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);});
             }
         },"subtitle-processing");
