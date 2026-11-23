@@ -49,6 +49,6 @@ class SmoothUiTests(unittest.TestCase):
             self.assertIn(x,SRC)
         build=(ROOT/'app/build.gradle').read_text()
         self.assertRegex(build,r'versionCode\s+1[0-9]')
-        self.assertRegex(build,r"versionName '1\.[78]\.")
+        self.assertRegex(build,r"versionName '1\.(?:[789])\.")
 
 if __name__=='__main__':unittest.main()
