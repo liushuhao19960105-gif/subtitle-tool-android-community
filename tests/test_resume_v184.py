@@ -66,8 +66,8 @@ class ResumeV184Tests(unittest.TestCase):
 
     def test_version_and_public_signing_safety(self):
         gradle=(ROOT/"app/build.gradle").read_text()
-        self.assertIn("versionCode 15",gradle)
-        self.assertIn("1.8.4-resume-community",gradle)
+        self.assertIn("versionCode 16",gradle)
+        self.assertIn("1.8.5-quality-community",gradle)
         self.assertNotIn("SUBTITLE_SIGNING_",gradle)
         wf=(ROOT/".github/workflows/community-ci.yml").read_text()
         self.assertNotIn("secrets.",wf)
