@@ -68,6 +68,8 @@ class ModesAndUsageTests(unittest.TestCase):
         self.assertIn("if(ledger!=null)ledger.record(response)",PIPELINE)
         self.assertLess(PIPELINE.index("if(ledger!=null)ledger.record(response)"),
                         PIPELINE.index("JSONArray choices=response.optJSONArray("))
+        self.assertIn("UsageLedger.open(this,job,checkpoint!=null)",MAIN)
+        self.assertIn("if(resume && file.isFile()",LEDGER)
         self.assertIn("usageInfo.setText(usage.summary(",MAIN)
         self.assertIn("inputPrice.getText().toString()",MAIN)
         self.assertIn("outputPrice.getText().toString()",MAIN)
