@@ -37,7 +37,7 @@ final class SubtitleQuality {
     private SubtitleQuality(){}
     private static boolean vocalOnly(String text){
         if(text==null)return false;
-        String t=text.replaceAll("[（）()\[\]，。！？,.!?…\s]","").trim();
+        String t=text.replaceAll("[（）()\\[\\]，。！？,.!?…\\s]","").trim();
         if(t.isEmpty() || t.length()>16)return false;
         String sounds="啊呀嗯唔哦噢呃哼哈嗬唉嘶嘿哇呜咦呼";
         for(int i=0;i<t.length();i++)if(sounds.indexOf(t.charAt(i))<0)return false;
