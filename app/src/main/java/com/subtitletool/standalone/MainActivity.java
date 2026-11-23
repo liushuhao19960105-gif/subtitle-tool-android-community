@@ -72,7 +72,11 @@ public final class MainActivity extends Activity {
     private Button settingsToggle, saveBtn;
     private boolean credentialsExpanded=false;
     private int activeProviderIndex=0, activeAsrIndex=0;
-    private Spinner providerSpinner, asrSpinner;
+    private Spinner providerSpinner, asrSpinner, qualityModeSpinner;
+    private EditText inputPrice, outputPrice;
+    private TextView usageInfo;
+    private volatile UsageLedger taskUsage;
+    private double currentInputPrice=-1,currentOutputPrice=-1;
     private TextView savedInfo, selectedInfo, status, logs;
     private ProgressBar progress;
     private Button startBtn, stopBtn, exportBtn, logBtn, clearCheckpointBtn, qualityBtn, previewBtn;
@@ -302,6 +306,24 @@ public final class MainActivity extends Activity {
         fieldLabel(configCard,"翻译模型 ID");
         modelName=input("模型 ID",false);modelName.setSelectAllOnFocus(true);modelName.setImeOptions(EditorInfo.IME_ACTION_DONE);
         add(configCard,modelName);
+        gap(configCard,12);
+        fieldLabel(configCard,"翻译质量模式");
+        qualityModeSpinner=selector(TranslationMode.labels());add(configCard,qualityModeSpinner);
+        qualityModeSpinner.setSelection(prefs.getInt("quality_mode",1));
+        gap(configCard,5);
+        add(configCard,txt("快速：初译1轮；标准：初译+润色+终审3轮；高质量：再加深度复核4轮。费用随请求数增加。",12,MUTED,false));
+        gap(configCard,13);
+        fieldLabel(configCard,"翻译模型价格（美元 / 百万 Token，由你自行填写）");
+        inputPrice=input("输入 Token 单价（美元/百万）",false);
+        outputPrice=input("输出 Token 单价（美元/百万）",false);
+        inputPrice.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        outputPrice.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        inputPrice.setText(prefs.getString("usage_input_price",""));
+        outputPrice.setText(prefs.getString("usage_output_price",""));
+        add(configCard,inputPrice);
+        gap(configCard,6);add(configCard,outputPrice);
+        gap(configCard,5);
+        add(configCard,txt("不同模型与平台价格不同；这里只估算翻译 API，不含语音识别费。未填写单价仍会统计已上报的 Token。",12,MUTED,false));
 
         savedInfo=txt("",12,GREEN,false);gap(configCard,9);add(configCard,savedInfo);
         LinearLayout toggles=new LinearLayout(this);toggles.setOrientation(LinearLayout.HORIZONTAL);
@@ -343,6 +365,23 @@ public final class MainActivity extends Activity {
         };
         modelName.addTextChangedListener(resumeConfigWatcher);
         apiEndpoint.addTextChangedListener(resumeConfigWatcher);
+        qualityModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(AdapterView<?> parent,View view,int position,long id){
+                prefs.edit().putInt("quality_mode",position).apply();
+                if(pickedUri!=null && !busy)refreshResumeState();
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent){}
+        });
+        TextWatcher priceWatcher=new TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence x,int start,int count,int after){}
+            @Override public void onTextChanged(CharSequence x,int start,int before,int count){}
+            @Override public void afterTextChanged(Editable x){
+                prefs.edit().putString("usage_input_price",inputPrice.getText().toString().trim())
+                    .putString("usage_output_price",outputPrice.getText().toString().trim()).apply();
+            }
+        };
+        inputPrice.addTextChangedListener(priceWatcher);
+        outputPrice.addTextChangedListener(priceWatcher);
 
         gap(root,12);
         LinearLayout taskCard=card(root);
@@ -377,6 +416,8 @@ public final class MainActivity extends Activity {
         progress.setMax(100);progress.setProgress(0);progress.setProgressTintList(android.content.res.ColorStateList.valueOf(GREEN));
         progress.setVisibility(View.GONE);add(taskCard,progress);
         status=txt("就绪",13,MUTED,false);gap(taskCard,8);add(taskCard,status);
+        usageInfo=txt("尚无本次任务的翻译 API Token 数据；请注意语音识别费用另计。",12,MUTED,false);
+        gap(taskCard,8);add(taskCard,usageInfo);
         exportBtn=btn("下载中文字幕 ASS",false);exportBtn.setVisibility(View.GONE);
         gap(taskCard,10);add(taskCard,exportBtn);exportBtn.setOnClickListener(v->export());
         qualityBtn=quietBtn("查看字幕质量报告");qualityBtn.setVisibility(View.GONE);
@@ -666,7 +707,11 @@ public final class MainActivity extends Activity {
         return "视频文件";
     }
     private void showProgress(int percent,String message){
-        main.post(()->{progress.setVisibility(View.VISIBLE);progress.setProgress(percent);status.setText(message);log(message);});
+        main.post(()->{
+            progress.setVisibility(View.VISIBLE);progress.setProgress(percent);status.setText(message);log(message);
+            UsageLedger usage=taskUsage;
+            if(usage!=null && usageInfo!=null)usageInfo.setText(usage.summary(currentInputPrice,currentOutputPrice));
+        });
     }
     private void log(String line){
         String old=logs.getText().toString();
@@ -692,13 +737,14 @@ public final class MainActivity extends Activity {
         final String asr=AsrProviders.byIndex(asrSpinner.getSelectedItemPosition()).id;
         final String endpoint=apiEndpoint.getText().toString();
         final String model=modelName.getText().toString().trim();
+        final TranslationMode mode=TranslationMode.fromIndex(qualityModeSpinner.getSelectedItemPosition());
         resumeAvailable=false;
         renderResumeControls();
         new Thread(()->{
             boolean found=false;
             try {
                 String source=TranslationCheckpoint.sourceIdentity(this,uri,name);
-                String config=TranslationCheckpoint.configuration(asr,endpoint,model);
+                String config=TranslationCheckpoint.configuration(asr,endpoint,model,mode);
                 found=TranslationCheckpoint.load(this,source,config)!=null;
             }catch(Exception ignored){/* If identity cannot be verified, do not offer resume. */}
             final boolean result=found;
@@ -717,6 +763,13 @@ public final class MainActivity extends Activity {
         ProviderPresets.Provider provider=ProviderPresets.byIndex(providerSpinner.getSelectedItemPosition());
         String endpoint=ProviderPresets.normalizeEndpoint(apiEndpoint.getText().toString());
         String model=modelName.getText().toString().trim();
+        final TranslationMode mode=TranslationMode.fromIndex(qualityModeSpinner.getSelectedItemPosition());
+        currentInputPrice=UsageLedger.price(inputPrice.getText().toString());
+        currentOutputPrice=UsageLedger.price(outputPrice.getText().toString());
+        if((currentInputPrice<0 && !inputPrice.getText().toString().trim().isEmpty()) ||
+           (currentOutputPrice<0 && !outputPrice.getText().toString().trim().isEmpty())){
+            status.setText("Token 单价请输入 0 至 10000 之间的数字，或留空");return;
+        }
         final AsrProviders.Provider asr=AsrProviders.byIndex(asrSpinner.getSelectedItemPosition());
         final String asrSecret,translate;
         try { asrSecret=secure.load(asr.keySlot);translate=secure.load(provider.keySlot()); }
@@ -736,6 +789,7 @@ public final class MainActivity extends Activity {
         for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(false);
         asrSpinner.setEnabled(false);providerSpinner.setEnabled(false);
         modelName.setEnabled(false);asrKey.setEnabled(false);modelKey.setEnabled(false);
+        qualityModeSpinner.setEnabled(false);inputPrice.setEnabled(false);outputPrice.setEnabled(false);
         apiEndpoint.setEnabled(false);saveBtn.setEnabled(false);settingsToggle.setEnabled(false);
         exportBtn.setVisibility(View.GONE);
         previewBtn.setVisibility(View.GONE);
@@ -746,9 +800,13 @@ public final class MainActivity extends Activity {
             try {
                 // A matching private checkpoint avoids re-uploading ASR audio and replaying finished batches.
                 String sourceIdentity=TranslationCheckpoint.sourceIdentity(this,uri,originalName);
-                String configIdentity=TranslationCheckpoint.configuration(asr.id,endpoint,model);
+                String configIdentity=TranslationCheckpoint.configuration(asr.id,endpoint,model,mode);
                 TranslationCheckpoint checkpoint=TranslationCheckpoint.load(this,sourceIdentity,configIdentity);
+                // An unidentifiable file must not accidentally inherit a different task's usage.
+                String job=(sourceIdentity==null?java.util.UUID.randomUUID().toString():sourceIdentity)+":"+configIdentity;
+                taskUsage=UsageLedger.open(this,job);
                 pipeline=new CloudPipeline(stop);
+                pipeline.setUsageLedger(taskUsage);
                 List<SubtitleData.Cue> cues;
                 if(checkpoint!=null) {
                     cues=checkpoint.cues;
@@ -775,7 +833,7 @@ public final class MainActivity extends Activity {
                         checkpoint.save(this);
                     }
                 }
-                pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this);
+                pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this,mode);
                 SubtitleQuality.Report quality=SubtitleQuality.inspect(cues);
                 String qualityText=quality.firstDetails(30);
                 String ass=AssWriter.render(cues);
@@ -824,6 +882,7 @@ public final class MainActivity extends Activity {
                     for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(true);
                     asrSpinner.setEnabled(true);providerSpinner.setEnabled(true);
                     modelName.setEnabled(true);asrKey.setEnabled(true);modelKey.setEnabled(true);
+                    qualityModeSpinner.setEnabled(true);inputPrice.setEnabled(true);outputPrice.setEnabled(true);
                     apiEndpoint.setEnabled(ProviderPresets.byIndex(activeProviderIndex).custom);
                     saveBtn.setEnabled(true);settingsToggle.setEnabled(true);
                     if(completedAss!=null && completedAss.isFile())exportBtn.setVisibility(View.VISIBLE);
