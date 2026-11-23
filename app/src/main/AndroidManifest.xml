@@ -9,6 +9,10 @@
         android:usesCleartextTraffic="false"
         android:theme="@style/SubtitleTheme">
         <activity
+            android:name=".SubtitleEditorActivity"
+            android:screenOrientation="portrait"
+            android:exported="false" />
+        <activity
             android:name=".MainActivity"
             android:screenOrientation="portrait"
             android:exported="true">
