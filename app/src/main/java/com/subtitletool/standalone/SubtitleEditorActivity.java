@@ -29,7 +29,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.LinkedHashMap;
-import java.util.Map;
 
 /** V1.9.0: private, local cue preview and manual Chinese edit. No server calls. */
 public final class SubtitleEditorActivity extends Activity {
@@ -225,8 +224,8 @@ public final class SubtitleEditorActivity extends Activity {
                         main.post(()->{
                             rows.set(index,rowText(cue));
                             adapter.notifyDataSetChanged();
-                            refreshProblemNavigator();
                             saving=false;
+                            refreshProblemNavigator();
                             dialog.dismiss();
                             Toast.makeText(this,"字幕已保存，ASS 已同步更新",Toast.LENGTH_SHORT).show();
                         });
