@@ -75,7 +75,8 @@ public final class MainActivity extends Activity {
     private Spinner providerSpinner, asrSpinner;
     private TextView savedInfo, selectedInfo, status, logs;
     private ProgressBar progress;
-    private Button startBtn, stopBtn, exportBtn, logBtn, clearCheckpointBtn;
+    private Button startBtn, stopBtn, exportBtn, logBtn, clearCheckpointBtn, qualityBtn;
+    private String latestQualityReport="";
     private LinearLayout taskActionsRow, selectedFilePanel;
     private volatile int resumeCheckGeneration=0;
     private boolean resumeAvailable=false;
@@ -114,6 +115,13 @@ public final class MainActivity extends Activity {
             status.setText(upgraded?"上次字幕已整理，可直接下载":
                 reflowFailed?"上次字幕已恢复（排版优化失败）":
                 "上次字幕已恢复，可直接下载");
+        }
+        File priorQuality=new File(getFilesDir(),"last_quality_report.txt");
+        if(priorQuality.isFile() && priorQuality.length()<16000){
+            try{
+                latestQualityReport=new String(Files.readAllBytes(priorQuality.toPath()),StandardCharsets.UTF_8);
+                qualityBtn.setVisibility(View.VISIBLE);
+            }catch(Exception ignored){/* Stored report is optional. */}
         }
         updateSavedInfo();
     }
@@ -354,6 +362,11 @@ public final class MainActivity extends Activity {
         status=txt("就绪",13,MUTED,false);gap(taskCard,8);add(taskCard,status);
         exportBtn=btn("下载中文字幕 ASS",false);exportBtn.setVisibility(View.GONE);
         gap(taskCard,10);add(taskCard,exportBtn);exportBtn.setOnClickListener(v->export());
+        qualityBtn=quietBtn("查看字幕质量报告");qualityBtn.setVisibility(View.GONE);
+        gap(taskCard,6);add(taskCard,qualityBtn);
+        qualityBtn.setOnClickListener(v->new AlertDialog.Builder(this)
+            .setTitle("字幕质量初检").setMessage(latestQualityReport)
+            .setPositiveButton("知道了",null).show());
         gap(taskCard,10);
         logBtn=quietBtn("运行日志  ▾");add(taskCard,logBtn);
         logs=txt("",12,MUTED,false);logs.setPadding(dp(9),dp(10),dp(9),dp(10));
@@ -736,6 +749,8 @@ public final class MainActivity extends Activity {
                     }
                 }
                 pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this);
+                SubtitleQuality.Report quality=SubtitleQuality.inspect(cues);
+                String qualityText=quality.firstDetails(30);
                 String ass=AssWriter.render(cues);
                 File target=new File(getFilesDir(),"last_result.ass");
                 File tmp=new File(getFilesDir(),"last_result.ass.tmp");
@@ -753,8 +768,14 @@ public final class MainActivity extends Activity {
                 // Keep checkpoint until the final subtitle was actually persisted.
                 if(checkpoint!=null)TranslationCheckpoint.clear(this);
                 prefs.edit().putString("last_file",outputName).apply();
-                showProgress(100,"已完成："+outputName+"（"+cues.size()+" 段原始对白）");
-                main.post(()->exportBtn.setVisibility(View.VISIBLE));
+                // Quality reports contain local cue IDs/reasons only, never API secrets or video audio.
+                try(FileOutputStream qualityFile=new FileOutputStream(new File(getFilesDir(),"last_quality_report.txt"))){
+                    qualityFile.write(qualityText.getBytes(StandardCharsets.UTF_8));
+                }catch(Exception ignored){/* Diagnostic report is advisory, not a reason to reject the ASS. */}
+                String qualityNote=quality.findings.isEmpty()?"":"，建议复核 "+quality.findings.size()+" 处";
+                showProgress(100,"已完成："+outputName+"（"+cues.size()+" 段对白"+qualityNote+"）");
+                main.post(()->{exportBtn.setVisibility(View.VISIBLE);
+                    latestQualityReport=qualityText;qualityBtn.setVisibility(View.VISIBLE);});
             } catch(InterruptedException e) {
                 showProgress(progress.getProgress(),"任务已取消；之前完成的字幕仍保留在本机");
             } catch(Exception e) {
