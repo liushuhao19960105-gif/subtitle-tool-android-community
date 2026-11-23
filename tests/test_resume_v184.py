@@ -62,7 +62,7 @@ class ResumeV184Tests(unittest.TestCase):
         self.assertIn("checkpoint=TranslationCheckpoint.fresh",self.main)
         self.assertIn("pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this)",self.main)
         self.assertIn('TranslationCheckpoint.clear(this);',self.main)
-        self.assertIn("清除未完成翻译进度",self.main)
+        self.assertIn('quietBtn("清除进度")',self.main)
 
     def test_version_and_public_signing_safety(self):
         gradle=(ROOT/"app/build.gradle").read_text()
