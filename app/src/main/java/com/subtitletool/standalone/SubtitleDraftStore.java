@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.util.List;
+import java.util.Arrays;
 
 /** Local editable cue snapshot; never includes keys, audio or requests to cloud APIs. */
 final class SubtitleDraftStore {
@@ -63,6 +64,17 @@ final class SubtitleDraftStore {
             new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8)));
         validate(cues);
         return cues;
+    }
+    /** Repair the previous edit after an interruption between draft and ASS writes.
+     *  Only called for the already-validated current editable draft. */
+    static boolean ensureAssMatchesDraft(Context context,List<SubtitleData.Cue> cues) throws Exception {
+        validate(cues);
+        File target=new File(context.getFilesDir(),"last_result.ass");
+        byte[] expected=AssWriter.render(cues).getBytes(StandardCharsets.UTF_8);
+        if(target.isFile() && target.length()==expected.length &&
+                Arrays.equals(Files.readAllBytes(target.toPath()),expected))return false;
+        writeAss(context,cues);
+        return true;
     }
     static void writeAss(Context context,List<SubtitleData.Cue> cues) throws Exception {
         validate(cues);
