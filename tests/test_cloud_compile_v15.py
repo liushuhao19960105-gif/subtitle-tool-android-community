@@ -49,9 +49,14 @@ class SubtitleData {
  static List<Cue> fromDeepgram(JSONObject d){return new ArrayList<>();}
 }
 class TranslationCheckpoint {
- int firstDone,reviewDone;
+ int firstDone,reviewDone,deepDone;
  void save(android.content.Context context) {}
 }
+class UsageLedger {
+ void record(JSONObject response) {}
+}
+enum TranslationMode {QUICK,STANDARD,HIGH}
+
 '''
 ANDROID_CONTEXT='''package android.content;
 public class Context {}
