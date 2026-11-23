@@ -48,6 +48,21 @@ public class TestQuality {
           "grouped vocalizations should not be flagged as redundant");
   }
   ok(differingEnglishDuplicateFlagged,"distinct English lines sharing Chinese need review");
+  // Flag likely lost meaning but do not change any translated characters.
+  List<SubtitleData.Cue> semantic=new ArrayList<>();
+  semantic.add(cue(10,11000,13000,"I don't want to go.","我现在想走"));
+  semantic.add(cue(11,13500,15000,"We need 12 minutes.","我们还需要时间"));
+  semantic.add(cue(12,15500,17500,"I do not want to go.","我不想走"));
+  semantic.add(cue(13,17800,18700,"We need 2 minutes.","我们还需要两分钟"));
+  SubtitleQuality.Report clues=SubtitleQuality.inspect(semantic);
+  boolean missingNegation=false,missingNumber=false;
+  for(SubtitleQuality.Finding clue:clues.findings){
+      if(clue.cueId==10 && clue.concern.contains("否定"))missingNegation=true;
+      if(clue.cueId==11 && clue.concern.contains("数字"))missingNumber=true;
+      ok(clue.cueId!=12 && clue.cueId!=13,"correctly translated negation/number must not be flagged");
+  }
+  ok(missingNegation && missingNumber,"missing negation and numeric clues are advisory");
+  ok(semantic.get(0).zh.equals("我现在想走"),"quality checks must never rewrite a translation");
   String ass=AssWriter.render(Collections.singletonList(items.get(0)));
   ok(ass.contains("\\N"),"long Chinese sentence needs a balanced display break");
   ok(ass.contains("我们今天应该重新检查"),"original content must be retained");
