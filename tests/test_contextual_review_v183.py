@@ -34,8 +34,8 @@ class ContextualReviewTests(unittest.TestCase):
             self.assertIn(phrase, prompt)
 
     def test_version(self):
-        self.assertIn("versionCode 17", GRADLE)
-        self.assertIn("1.9.0-editor-community", GRADLE)
+        self.assertIn("versionCode 18", GRADLE)
+        self.assertIn("1.9.1-modes-community", GRADLE)
 
 
 if __name__ == "__main__":
