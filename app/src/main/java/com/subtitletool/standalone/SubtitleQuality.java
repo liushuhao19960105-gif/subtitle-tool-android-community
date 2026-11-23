@@ -35,12 +35,30 @@ final class SubtitleQuality {
         }
     }
     private SubtitleQuality(){}
+    /** Classify only genuinely isolated vocalizations, including adjacent grouped sounds. */
     private static boolean vocalOnly(String text){
-        if(text==null)return false;
-        String t=text.replaceAll("[（）()\\[\\]，。！？,.!?…\\s]","").trim();
-        if(t.isEmpty() || t.length()>16)return false;
-        String sounds="啊呀嗯唔哦噢呃哼哈嗬唉嘶嘿哇呜咦呼";
-        for(int i=0;i<t.length();i++)if(sounds.indexOf(t.charAt(i))<0)return false;
+        if(text==null || text.trim().isEmpty())return false;
+        StringBuilder letters=new StringBuilder();
+        String clean=text.replace("\\N","");
+        for(int i=0;i<clean.length();i++){
+            char c=clean.charAt(i);
+            if(Character.isLetter(c) || Character.isDigit(c))letters.append(c);
+        }
+        String token=letters.toString();
+        if(token.isEmpty() || token.length()>32)return false;
+        String[] labels={"急促喘息","轻声喘息","喘息","呻吟","低吟","尖叫",
+            "惊叫","惊呼","抽泣","哭泣","笑声","轻笑","大笑","喘气"};
+        String singles="啊呀嗯唔哦噢呃哼哈嗬唉嘶嘿哇呜咦噫呼";
+        for(int at=0;at<token.length();){
+            boolean matched=false;
+            for(String label:labels){
+                if(token.startsWith(label,at)){at+=label.length();matched=true;break;}
+            }
+            if(!matched){
+                if(singles.indexOf(token.charAt(at))<0)return false;
+                at++;
+            }
+        }
         return true;
     }
     static Report inspect(List<SubtitleData.Cue> cues){
