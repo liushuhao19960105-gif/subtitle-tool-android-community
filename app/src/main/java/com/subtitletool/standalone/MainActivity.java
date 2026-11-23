@@ -73,7 +73,7 @@ public final class MainActivity extends Activity {
     private Spinner providerSpinner, asrSpinner;
     private TextView savedInfo, selectedInfo, status, logs;
     private ProgressBar progress;
-    private Button startBtn, stopBtn, exportBtn, logBtn;
+    private Button startBtn, stopBtn, exportBtn, logBtn, clearCheckpointBtn;
     private Button audioToolToggle,audioExportBtn;
     private LinearLayout audioPanel,audioTimeFields,audioToolCard;
     private RadioGroup audioMode;
@@ -302,6 +302,18 @@ public final class MainActivity extends Activity {
         stopBtn=quietBtn("停止当前任务");stopBtn.setEnabled(false);stopBtn.setVisibility(View.GONE);
         gap(taskCard,7);add(taskCard,stopBtn);
         startBtn.setOnClickListener(v->start());stopBtn.setOnClickListener(v->cancel());
+        clearCheckpointBtn=quietBtn("清除未完成翻译进度");
+        add(taskCard,clearCheckpointBtn);
+        clearCheckpointBtn.setOnClickListener(v->{
+            if(busy)return;
+            new AlertDialog.Builder(this).setTitle("清除恢复进度？")
+                .setMessage("下次开始将重新识别并翻译。已完成的 ASS 文件不会删除。")
+                .setNegativeButton("取消",null)
+                .setPositiveButton("确认清除",(dialog,which)->{
+                    TranslationCheckpoint.clear(this);
+                    status.setText("已清除未完成进度，下次将从头处理");
+                }).show();
+        });
         gap(taskCard,14);
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(false);
         progress.setMax(100);progress.setProgress(0);progress.setProgressTintList(android.content.res.ColorStateList.valueOf(GREEN));
@@ -606,6 +618,7 @@ public final class MainActivity extends Activity {
         final String requestedName=AssWriter.outputName(originalName);
         hideKeyboard();
         busy=true;stop.set(false);startBtn.setEnabled(false);stopBtn.setEnabled(true);
+        clearCheckpointBtn.setEnabled(false);
         stopBtn.setVisibility(View.VISIBLE);audioExportBtn.setEnabled(false);audioToolToggle.setEnabled(false);
         for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(false);
         asrSpinner.setEnabled(false);providerSpinner.setEnabled(false);
@@ -617,25 +630,38 @@ public final class MainActivity extends Activity {
         Thread worker=new Thread(()->{
             File work=new File(getCacheDir(),"subtitle_work");work.mkdirs();
             try {
-                showProgress(3,"正在从视频中提取音频…");
-                AudioExtractor.AudioFile audio=AudioExtractor.extract(this,uri,work,stop,
-                    percent -> showProgress(percent,"正在提取音频…（"+percent+"%）"));
-                if(stop.get())throw new InterruptedException("任务已取消");
-                showProgress(18,"已生成标准 PCM WAV（"+(audio.file.length()/1024/1024)+" MB）");
+                // A matching private checkpoint avoids re-uploading ASR audio and replaying finished batches.
+                String sourceIdentity=TranslationCheckpoint.sourceIdentity(this,uri,originalName);
+                String configIdentity=TranslationCheckpoint.configuration(asr.id,endpoint,model);
+                TranslationCheckpoint checkpoint=TranslationCheckpoint.load(this,sourceIdentity,configIdentity);
                 pipeline=new CloudPipeline(stop);
                 List<SubtitleData.Cue> cues;
-                if(AsrProviders.ASSEMBLYAI.equals(asr.id)) {
-                    assemblyTranscriber=new AssemblyAiTranscriber(stop);
-                    cues=assemblyTranscriber.transcribe(audio,asrSecret,this::showProgress);
+                if(checkpoint!=null) {
+                    cues=checkpoint.cues;
+                    showProgress(39,"已找到相同视频的恢复进度：跳过英文识别及已完成的翻译批次");
                 } else {
-                    cues=pipeline.transcribe(audio,asrSecret,this::showProgress);
+                    showProgress(3,"正在从视频中提取音频…");
+                    AudioExtractor.AudioFile audio=AudioExtractor.extract(this,uri,work,stop,
+                        percent -> showProgress(percent,"正在提取音频…（"+percent+"%）"));
+                    if(stop.get())throw new InterruptedException("任务已取消");
+                    showProgress(18,"已生成标准 PCM WAV（"+(audio.file.length()/1024/1024)+" MB）");
+                    if(AsrProviders.ASSEMBLYAI.equals(asr.id)) {
+                        assemblyTranscriber=new AssemblyAiTranscriber(stop);
+                        cues=assemblyTranscriber.transcribe(audio,asrSecret,this::showProgress);
+                    } else {
+                        cues=pipeline.transcribe(audio,asrSecret,this::showProgress);
+                    }
+                    // Privacy: keep recognized data in private app storage, never upload video.
+                    File transcript=new File(getFilesDir(),"last_english.json");
+                    try(FileOutputStream out=new FileOutputStream(transcript)){
+                        out.write(SubtitleData.toJson(cues).toString().getBytes(StandardCharsets.UTF_8));
+                    }
+                    if(sourceIdentity!=null) {
+                        checkpoint=TranslationCheckpoint.fresh(sourceIdentity,configIdentity,cues);
+                        checkpoint.save(this);
+                    }
                 }
-                // Privacy: keep recognized data in private application storage, do not upload video.
-                File transcript=new File(getFilesDir(),"last_english.json");
-                try(FileOutputStream out=new FileOutputStream(transcript)){
-                    out.write(SubtitleData.toJson(cues).toString().getBytes(StandardCharsets.UTF_8));
-                }
-                pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress);
+                pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this);
                 String ass=AssWriter.render(cues);
                 File target=new File(getFilesDir(),"last_result.ass");
                 File tmp=new File(getFilesDir(),"last_result.ass.tmp");
@@ -650,6 +676,8 @@ public final class MainActivity extends Activity {
                     tmp.delete();
                 }
                 completedAss=target;outputName=requestedName;
+                // Keep checkpoint until the final subtitle was actually persisted.
+                if(checkpoint!=null)TranslationCheckpoint.clear(this);
                 prefs.edit().putString("last_file",outputName).apply();
                 showProgress(100,"已完成："+outputName+"（"+cues.size()+" 段原始对白）");
                 main.post(()->exportBtn.setVisibility(View.VISIBLE));
@@ -661,7 +689,7 @@ public final class MainActivity extends Activity {
             } finally {
                 pipeline=null;assemblyTranscriber=null;
                 new File(work,"asr_audio.m4a").delete();new File(work,"asr_audio.wav").delete();
-                main.post(()->{busy=false;startBtn.setEnabled(true);stopBtn.setEnabled(false);
+                main.post(()->{busy=false;startBtn.setEnabled(true);clearCheckpointBtn.setEnabled(true);stopBtn.setEnabled(false);
                     stopBtn.setVisibility(View.GONE);audioExportBtn.setEnabled(true);audioToolToggle.setEnabled(true);
                     for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(true);
                     asrSpinner.setEnabled(true);providerSpinner.setEnabled(true);
