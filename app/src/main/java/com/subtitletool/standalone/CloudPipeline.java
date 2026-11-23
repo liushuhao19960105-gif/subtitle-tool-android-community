@@ -23,6 +23,10 @@ public final class CloudPipeline {
     public interface Callback { void update(int percent, String label); }
     private final AtomicBoolean cancel;
     private volatile HttpURLConnection active;
+    private static final class RateLimitException extends IOException {
+        final int waitSeconds;
+        RateLimitException(int seconds){super("API 请求频率受限（HTTP 429）");waitSeconds=seconds;}
+    }
     private static final int MAX_JSON=24*1024*1024;
     CloudPipeline(AtomicBoolean cancel){this.cancel=cancel;}
     public void stop() { cancel.set(true);HttpURLConnection c=active;if(c!=null)c.disconnect(); }
@@ -67,7 +71,12 @@ public final class CloudPipeline {
                     "Deepgram 拒绝音频（HTTP 400）；WAV 已通过本机校验，请检查原片音轨或查看 Deepgram Logs");
                 if(deepgram && (code==401 || code==403))throw new IOException(
                     "Deepgram 认证失败（HTTP "+code+"），请检查 Key 权限");
-                if(code==429)throw new IOException("API 请求频率受限（HTTP 429），请稍后再试");
+                if(code==429) {
+                    int seconds=2;
+                    try { seconds=Integer.parseInt(c.getHeaderField("Retry-After")); }
+                    catch(Exception ignored) { /* Retry-After date uses fallback. */ }
+                    throw new RateLimitException(Math.max(2,Math.min(30,seconds)));
+                }
                 if(code>=500)throw new IOException("API 服务临时故障（HTTP "+code+"），请稍后再试");
                 throw new IOException((deepgram?"Deepgram":"翻译 API")+" 请求失败（HTTP "+code+"）");
             }
@@ -88,6 +97,22 @@ public final class CloudPipeline {
         return cues;
     }
     private JSONObject chat(String key,String model,String endpoint,JSONArray messages) throws Exception {
+        for(int attempt=0;attempt<3;attempt++) {
+            check();
+            try { return chatOnce(key,model,endpoint,messages); }
+            catch(RateLimitException limited) {
+                if(attempt==2)throw limited;
+                long until=System.nanoTime()+limited.waitSeconds*1000000000L;
+                while(System.nanoTime()<until) {
+                    check();
+                    long left=(until-System.nanoTime())/1000000L;
+                    if(left>0)Thread.sleep(Math.min(250,left));
+                }
+            }
+        }
+        throw new IOException("频率限制重试已耗尽");
+    }
+    private JSONObject chatOnce(String key,String model,String endpoint,JSONArray messages) throws Exception {
         JSONObject body=new JSONObject();body.put("model",model);body.put("messages",messages);body.put("stream",false);
         JSONObject response=post(endpoint,key,"Bearer","application/json",
                 body.toString().getBytes(StandardCharsets.UTF_8),null,150000);
@@ -154,6 +179,10 @@ public final class CloudPipeline {
         "保持 target ID 的顺序、数量及对应关系，每个 ID 都必须返回一条非空中文，不改变时间轴，不使用说话者标签、彩色或排版命令。"+
         "严格只返回 JSON：{\"items\":[{\"id\":1,\"zh\":\"校验后字幕\"}]}，不输出 Markdown。";
     public void translateAndPolish(List<SubtitleData.Cue> cues,String key,String endpoint,String model,Callback cb)throws Exception {
+        translateAndPolish(cues,key,endpoint,model,cb,null,null);
+    }
+    public void translateAndPolish(List<SubtitleData.Cue> cues,String key,String endpoint,String model,
+                                   Callback cb,TranslationCheckpoint checkpoint,android.content.Context context)throws Exception {
         endpoint=ProviderPresets.normalizeEndpoint(endpoint);
         if(key==null || key.trim().isEmpty()) throw new IllegalArgumentException("请先保存翻译服务商的 API Key");
         if(model==null || model.trim().isEmpty()) throw new IllegalArgumentException("请填写翻译模型 ID");
