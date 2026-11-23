@@ -28,7 +28,7 @@ public class TestQuality {
   List<SubtitleData.Cue> items=new ArrayList<>();
   items.add(cue(1,0,3800,"We should recheck the entire conversation.",
       "我们今天应该重新检查这整段对白的逻辑，然后再重新安排字幕的换行位置。"));
-  items.add(cue(2,4000,4200,"I have to say this right now.","这句话实在是太长了"));
+  items.add(cue(2,4000,4200,"I have to say this right now.","这句话真的太长了根本来不及在这个时间看清楚"));
   items.add(cue(3,5000,6000,"This is not a complete sentence.","了。"));
   items.add(cue(4,6200,6800,"Ah","啊啊啊啊啊啊"));
   items.add(cue(5,6850,7500,"Oh","啊啊啊啊啊啊"));
