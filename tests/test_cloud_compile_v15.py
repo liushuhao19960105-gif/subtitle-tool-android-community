@@ -48,6 +48,21 @@ class SubtitleData {
  }
  static List<Cue> fromDeepgram(JSONObject d){return new ArrayList<>();}
 }
+class TranslationCheckpoint {
+ int firstDone,reviewDone,deepDone;
+ void save(android.content.Context context) {}
+}
+class UsageLedger {
+ void record(JSONObject response) {}
+}
+class DialogueLexicon {
+ org.json.JSONArray hints(java.util.List<SubtitleData.Cue> cues,int start,int end){return new org.json.JSONArray();}
+}
+enum TranslationMode {QUICK,STANDARD,HIGH}
+
+'''
+ANDROID_CONTEXT='''package android.content;
+public class Context {}
 '''
 CHECK='''package com.subtitletool.standalone;
 import java.util.*;
@@ -81,6 +96,8 @@ class CloudCompileV15(unittest.TestCase):
    js=root/'org/json';js.mkdir(parents=True)
    (pkg/'CloudPipeline.java').write_bytes((PKG/'CloudPipeline.java').read_bytes())
    (pkg/'Adapter.java').write_text(ADAPTER)
+   android=root/'android/content';android.mkdir(parents=True)
+   (android/'Context.java').write_text(ANDROID_CONTEXT)
    (pkg/'CompileCheck.java').write_text(CHECK)
    (js/'JSONObject.java').write_text(JSON_OBJECT)
    (js/'JSONArray.java').write_text(JSON_ARRAY)

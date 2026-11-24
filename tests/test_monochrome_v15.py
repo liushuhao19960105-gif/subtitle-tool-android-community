@@ -110,6 +110,6 @@ class V15Tests(unittest.TestCase):
         self.assertIn('AssExportManager.saveToDownloads(this,file,wanted)',src)
         gradle=(ROOT/'app/build.gradle').read_text()
         self.assertRegex(gradle,r'versionCode\s+1[0-9]')
-        self.assertRegex(gradle,r"versionName '1\.[78]\.")
+        self.assertRegex(gradle,r"versionName '1\.(?:[789])\.")
 
 if __name__=='__main__':unittest.main()

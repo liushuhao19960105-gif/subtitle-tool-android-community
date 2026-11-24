@@ -9,8 +9,8 @@ android {
         applicationId 'com.subtitletool.standalone'
         minSdk 26
         targetSdk 33
-        versionCode 14
-        versionName '1.8.3-review-community'
+        versionCode 19
+        versionName '1.9.1-lexicon-community'
     }
     buildTypes {
         debug { }

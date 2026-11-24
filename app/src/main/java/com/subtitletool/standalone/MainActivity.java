@@ -25,6 +25,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -70,10 +72,19 @@ public final class MainActivity extends Activity {
     private Button settingsToggle, saveBtn;
     private boolean credentialsExpanded=false;
     private int activeProviderIndex=0, activeAsrIndex=0;
-    private Spinner providerSpinner, asrSpinner;
+    private Spinner providerSpinner, asrSpinner, qualityModeSpinner;
+    private EditText inputPrice, outputPrice;
+    private TextView usageInfo;
+    private volatile UsageLedger taskUsage;
+    private double currentInputPrice=-1,currentOutputPrice=-1;
     private TextView savedInfo, selectedInfo, status, logs;
     private ProgressBar progress;
-    private Button startBtn, stopBtn, exportBtn, logBtn;
+    private Button startBtn, stopBtn, exportBtn, logBtn, clearCheckpointBtn, qualityBtn, previewBtn;
+    private String latestQualityReport="";
+    private LinearLayout taskActionsRow, selectedFilePanel;
+    private volatile int resumeCheckGeneration=0;
+    private boolean resumeAvailable=false;
+    private final Runnable pendingResumeRefresh=()->refreshResumeState();
     private Button audioToolToggle,audioExportBtn;
     private LinearLayout audioPanel,audioTimeFields,audioToolCard;
     private RadioGroup audioMode;
@@ -109,7 +120,31 @@ public final class MainActivity extends Activity {
                 reflowFailed?"上次字幕已恢复（排版优化失败）":
                 "上次字幕已恢复，可直接下载");
         }
+        File priorQuality=new File(getFilesDir(),"last_quality_report.txt");
+        if(priorQuality.isFile() && priorQuality.length()<16000){
+            try{
+                latestQualityReport=new String(Files.readAllBytes(priorQuality.toPath()),StandardCharsets.UTF_8);
+                qualityBtn.setVisibility(View.VISIBLE);
+            }catch(Exception ignored){/* Stored report is optional. */}
+        }
         updateSavedInfo();
+    }
+    @Override protected void onResume(){
+        super.onResume();
+        if(previewBtn!=null){
+            boolean available=!busy && SubtitleDraftStore.exists(this) &&
+                new File(getFilesDir(),"last_result.ass").isFile();
+            previewBtn.setVisibility(available?View.VISIBLE:View.GONE);
+        }
+        if(qualityBtn!=null){
+            File report=new File(getFilesDir(),"last_quality_report.txt");
+            if(report.isFile() && report.length()<16000){
+                try{
+                    latestQualityReport=new String(Files.readAllBytes(report.toPath()),StandardCharsets.UTF_8);
+                    qualityBtn.setVisibility(View.VISIBLE);
+                }catch(Exception ignored){}
+            }
+        }
     }
     /** One-time local upgrade. Keeps an untouched backup and makes no API call. */
     private boolean upgradeSavedAss(File prior) throws Exception {
@@ -235,14 +270,20 @@ public final class MainActivity extends Activity {
         ImageView logo=new ImageView(this);logo.setImageResource(R.mipmap.ic_launcher);
         header.addView(logo,new LinearLayout.LayoutParams(dp(43),dp(43)));
         LinearLayout head=vertical();head.setPadding(dp(11),0,0,0);
-        add(head,txt("视频字幕工具",22,INK,true));add(head,txt("单色字幕 · V1.8",12,MUTED,false));
+        add(head,txt("视频字幕工具",22,INK,true));add(head,txt("V1.9.1",12,MUTED,false));
         header.addView(head);add(root,header);
 
         gap(root,19);
         LinearLayout videoCard=card(root);
         add(videoCard,txt("视频文件",16,INK,true));gap(videoCard,11);
         Button choose=btn("选择视频或音频",false);add(videoCard,choose);
-        selectedInfo=txt("未选择文件",12,MUTED,false);selectedInfo.setMaxLines(2);gap(videoCard,8);add(videoCard,selectedInfo);
+        gap(videoCard,11);
+        selectedFilePanel=vertical();selectedFilePanel.setPadding(dp(13),dp(12),dp(13),dp(12));
+        selectedFilePanel.setBackground(rect(BG,false));
+        add(selectedFilePanel,txt("当前文件",12,GREEN,true));gap(selectedFilePanel,5);
+        selectedInfo=txt("尚未选择视频或音频",15,INK,true);
+        selectedInfo.setMaxLines(3);selectedInfo.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        add(selectedFilePanel,selectedInfo);add(videoCard,selectedFilePanel);
         choose.setOnClickListener(v->pickVideo());
 
         gap(root,12);
@@ -265,6 +306,24 @@ public final class MainActivity extends Activity {
         fieldLabel(configCard,"翻译模型 ID");
         modelName=input("模型 ID",false);modelName.setSelectAllOnFocus(true);modelName.setImeOptions(EditorInfo.IME_ACTION_DONE);
         add(configCard,modelName);
+        gap(configCard,12);
+        fieldLabel(configCard,"翻译质量模式");
+        qualityModeSpinner=selector(TranslationMode.labels());add(configCard,qualityModeSpinner);
+        qualityModeSpinner.setSelection(prefs.getInt("quality_mode",1));
+        gap(configCard,5);
+        add(configCard,txt("快速：初译1轮；标准：初译+润色+终审3轮；高质量：再加深度复核4轮。费用随请求数增加。",12,MUTED,false));
+        gap(configCard,13);
+        fieldLabel(configCard,"翻译模型价格（美元 / 百万 Token，由你自行填写）");
+        inputPrice=input("输入 Token 单价（美元/百万）",false);
+        outputPrice=input("输出 Token 单价（美元/百万）",false);
+        inputPrice.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        outputPrice.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        inputPrice.setText(prefs.getString("usage_input_price",""));
+        outputPrice.setText(prefs.getString("usage_output_price",""));
+        add(configCard,inputPrice);
+        gap(configCard,6);add(configCard,outputPrice);
+        gap(configCard,5);
+        add(configCard,txt("不同模型与平台价格不同；这里只估算翻译 API，不含语音识别费。未填写单价仍会统计已上报的 Token。",12,MUTED,false));
 
         savedInfo=txt("",12,GREEN,false);gap(configCard,9);add(configCard,savedInfo);
         LinearLayout toggles=new LinearLayout(this);toggles.setOrientation(LinearLayout.HORIZONTAL);
@@ -294,21 +353,87 @@ public final class MainActivity extends Activity {
         setCredentialsExpanded(needsKey,false);
         settingsToggle.setOnClickListener(v->setCredentialsExpanded(!credentialsExpanded,true));
         saveBtn.setOnClickListener(v->saveSettingsAsync());
+        TextWatcher resumeConfigWatcher=new TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence text,int start,int count,int after){}
+            @Override public void onTextChanged(CharSequence text,int start,int before,int count){}
+            @Override public void afterTextChanged(Editable text){
+                if(pickedUri!=null && !busy){
+                    main.removeCallbacks(pendingResumeRefresh);
+                    main.postDelayed(pendingResumeRefresh,500);
+                }
+            }
+        };
+        modelName.addTextChangedListener(resumeConfigWatcher);
+        apiEndpoint.addTextChangedListener(resumeConfigWatcher);
+        qualityModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(AdapterView<?> parent,View view,int position,long id){
+                prefs.edit().putInt("quality_mode",position).apply();
+                if(pickedUri!=null && !busy)refreshResumeState();
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent){}
+        });
+        TextWatcher priceWatcher=new TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence x,int start,int count,int after){}
+            @Override public void onTextChanged(CharSequence x,int start,int before,int count){}
+            @Override public void afterTextChanged(Editable x){
+                prefs.edit().putString("usage_input_price",inputPrice.getText().toString().trim())
+                    .putString("usage_output_price",outputPrice.getText().toString().trim()).apply();
+            }
+        };
+        inputPrice.addTextChangedListener(priceWatcher);
+        outputPrice.addTextChangedListener(priceWatcher);
 
         gap(root,12);
         LinearLayout taskCard=card(root);
         add(taskCard,txt("开始制作",16,INK,true));gap(taskCard,12);
         startBtn=btn("开始生成字幕",true);startBtn.setMinHeight(dp(52));add(taskCard,startBtn);
-        stopBtn=quietBtn("停止当前任务");stopBtn.setEnabled(false);stopBtn.setVisibility(View.GONE);
-        gap(taskCard,7);add(taskCard,stopBtn);
+        taskActionsRow=new LinearLayout(this);taskActionsRow.setOrientation(LinearLayout.HORIZONTAL);
+        taskActionsRow.setGravity(Gravity.CENTER_VERTICAL);taskActionsRow.setVisibility(View.GONE);
+        stopBtn=quietBtn("停止任务");stopBtn.setEnabled(false);stopBtn.setVisibility(View.GONE);
+        stopBtn.setMinHeight(dp(44));
+        LinearLayout.LayoutParams stopLayout=new LinearLayout.LayoutParams(0,dp(48),1f);
+        stopLayout.rightMargin=dp(6);taskActionsRow.addView(stopBtn,stopLayout);
         startBtn.setOnClickListener(v->start());stopBtn.setOnClickListener(v->cancel());
+        clearCheckpointBtn=quietBtn("清除进度");clearCheckpointBtn.setVisibility(View.GONE);
+        clearCheckpointBtn.setMinHeight(dp(44));
+        taskActionsRow.addView(clearCheckpointBtn,new LinearLayout.LayoutParams(0,dp(48),1f));
+        gap(taskCard,7);add(taskCard,taskActionsRow);
+        clearCheckpointBtn.setOnClickListener(v->{
+            if(busy)return;
+            new AlertDialog.Builder(this).setTitle("清除恢复进度？")
+                .setMessage("下次开始将重新识别并翻译。已完成的 ASS 文件不会删除。")
+                .setNegativeButton("取消",null)
+                .setPositiveButton("确认清除",(dialog,which)->{
+                    TranslationCheckpoint.clear(this);
+                    resumeCheckGeneration++;
+                    resumeAvailable=false;
+                    renderResumeControls();
+                    status.setText("进度已清除，下次将从头开始");
+                }).show();
+        });
         gap(taskCard,14);
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(false);
         progress.setMax(100);progress.setProgress(0);progress.setProgressTintList(android.content.res.ColorStateList.valueOf(GREEN));
         progress.setVisibility(View.GONE);add(taskCard,progress);
         status=txt("就绪",13,MUTED,false);gap(taskCard,8);add(taskCard,status);
+        usageInfo=txt("尚无本次任务的翻译 API Token 数据；请注意语音识别费用另计。",12,MUTED,false);
+        gap(taskCard,8);add(taskCard,usageInfo);
         exportBtn=btn("下载中文字幕 ASS",false);exportBtn.setVisibility(View.GONE);
         gap(taskCard,10);add(taskCard,exportBtn);exportBtn.setOnClickListener(v->export());
+        qualityBtn=quietBtn("查看字幕质量报告");qualityBtn.setVisibility(View.GONE);
+        gap(taskCard,6);add(taskCard,qualityBtn);
+        qualityBtn.setOnClickListener(v->new AlertDialog.Builder(this)
+            .setTitle("字幕质量初检").setMessage(latestQualityReport)
+            .setPositiveButton("知道了",null).show());
+        previewBtn=quietBtn("字幕预览与编辑");previewBtn.setVisibility(View.GONE);
+        gap(taskCard,6);add(taskCard,previewBtn);
+        previewBtn.setOnClickListener(v->{
+            if(busy)return;
+            if(!SubtitleDraftStore.exists(this)){
+                status.setText("请先完成一次字幕制作，再进行预览和编辑");return;
+            }
+            startActivity(new Intent(this,SubtitleEditorActivity.class));
+        });
         gap(taskCard,10);
         logBtn=quietBtn("运行日志  ▾");add(taskCard,logBtn);
         logs=txt("",12,MUTED,false);logs.setPadding(dp(9),dp(10),dp(9),dp(10));
@@ -381,6 +506,7 @@ public final class MainActivity extends Activity {
                     prefs.edit().putInt("asr_provider",position).apply();
                 }
                 updateSavedInfo();
+                if(pickedUri!=null && !busy)refreshResumeState();
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
@@ -397,6 +523,7 @@ public final class MainActivity extends Activity {
                     prefs.edit().putInt("provider",position).apply();
                 }
                 updateSavedInfo();
+                if(pickedUri!=null && !busy)refreshResumeState();
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
@@ -529,7 +656,9 @@ public final class MainActivity extends Activity {
             pickedUri=uri;originalName=displayName(uri);
             try { getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION); }
             catch(SecurityException ignored) { }
-            selectedInfo.setText("已选择："+originalName);
+            selectedInfo.setText(originalName);
+            selectedInfo.setContentDescription("已选择："+originalName);
+            refreshResumeState();
         } else if(requestCode==SAVE_AUDIO && pendingAudioFile!=null) {
             File ready=pendingAudioFile;
             try(java.io.FileInputStream in=new java.io.FileInputStream(ready);
@@ -578,12 +707,53 @@ public final class MainActivity extends Activity {
         return "视频文件";
     }
     private void showProgress(int percent,String message){
-        main.post(()->{progress.setVisibility(View.VISIBLE);progress.setProgress(percent);status.setText(message);log(message);});
+        main.post(()->{
+            progress.setVisibility(View.VISIBLE);progress.setProgress(percent);status.setText(message);log(message);
+            UsageLedger usage=taskUsage;
+            if(usage!=null && usageInfo!=null)usageInfo.setText(usage.summary(currentInputPrice,currentOutputPrice));
+        });
     }
     private void log(String line){
         String old=logs.getText().toString();
         if(old.length()>5500)old=old.substring(old.length()-4000);
         logs.setText(old+(old.isEmpty()?"":"\n")+line);
+    }
+    /** View state is derived from a verified matching checkpoint, not a stale button click. */
+    private void renderResumeControls(){
+        if(startBtn==null || clearCheckpointBtn==null || taskActionsRow==null)return;
+        startBtn.setText(resumeAvailable?"继续任务":"开始生成字幕");
+        clearCheckpointBtn.setVisibility(resumeAvailable?View.VISIBLE:View.GONE);
+        taskActionsRow.setVisibility((stopBtn!=null && stopBtn.getVisibility()==View.VISIBLE)
+                || resumeAvailable?View.VISIBLE:View.GONE);
+    }
+    private void refreshResumeState(){
+        final int generation=++resumeCheckGeneration;
+        final Uri uri=pickedUri;
+        if(startBtn==null || uri==null || busy){
+            if(uri==null){resumeAvailable=false;renderResumeControls();}
+            return;
+        }
+        final String name=originalName;
+        final String asr=AsrProviders.byIndex(asrSpinner.getSelectedItemPosition()).id;
+        final String endpoint=apiEndpoint.getText().toString();
+        final String model=modelName.getText().toString().trim();
+        final TranslationMode mode=TranslationMode.fromIndex(qualityModeSpinner.getSelectedItemPosition());
+        resumeAvailable=false;
+        renderResumeControls();
+        new Thread(()->{
+            boolean found=false;
+            try {
+                String source=TranslationCheckpoint.sourceIdentity(this,uri,name);
+                String config=TranslationCheckpoint.configuration(asr,endpoint,model,mode);
+                found=TranslationCheckpoint.load(this,source,config)!=null;
+            }catch(Exception ignored){/* If identity cannot be verified, do not offer resume. */}
+            final boolean result=found;
+            main.post(()->{
+                if(generation!=resumeCheckGeneration || busy || !uri.equals(pickedUri))return;
+                resumeAvailable=result;
+                renderResumeControls();
+            });
+        },"check-subtitle-resume-state").start();
     }
     private void start(){
         if(busy)return;
@@ -593,6 +763,13 @@ public final class MainActivity extends Activity {
         ProviderPresets.Provider provider=ProviderPresets.byIndex(providerSpinner.getSelectedItemPosition());
         String endpoint=ProviderPresets.normalizeEndpoint(apiEndpoint.getText().toString());
         String model=modelName.getText().toString().trim();
+        final TranslationMode mode=TranslationMode.fromIndex(qualityModeSpinner.getSelectedItemPosition());
+        currentInputPrice=UsageLedger.price(inputPrice.getText().toString());
+        currentOutputPrice=UsageLedger.price(outputPrice.getText().toString());
+        if((currentInputPrice<0 && !inputPrice.getText().toString().trim().isEmpty()) ||
+           (currentOutputPrice<0 && !outputPrice.getText().toString().trim().isEmpty())){
+            status.setText("Token 单价请输入 0 至 10000 之间的数字，或留空");return;
+        }
         final AsrProviders.Provider asr=AsrProviders.byIndex(asrSpinner.getSelectedItemPosition());
         final String asrSecret,translate;
         try { asrSecret=secure.load(asr.keySlot);translate=secure.load(provider.keySlot()); }
@@ -606,37 +783,68 @@ public final class MainActivity extends Activity {
         final String requestedName=AssWriter.outputName(originalName);
         hideKeyboard();
         busy=true;stop.set(false);startBtn.setEnabled(false);stopBtn.setEnabled(true);
-        stopBtn.setVisibility(View.VISIBLE);audioExportBtn.setEnabled(false);audioToolToggle.setEnabled(false);
+        clearCheckpointBtn.setEnabled(false);
+        stopBtn.setVisibility(View.VISIBLE);taskActionsRow.setVisibility(View.VISIBLE);
+        audioExportBtn.setEnabled(false);audioToolToggle.setEnabled(false);
         for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(false);
         asrSpinner.setEnabled(false);providerSpinner.setEnabled(false);
         modelName.setEnabled(false);asrKey.setEnabled(false);modelKey.setEnabled(false);
+        qualityModeSpinner.setEnabled(false);inputPrice.setEnabled(false);outputPrice.setEnabled(false);
         apiEndpoint.setEnabled(false);saveBtn.setEnabled(false);settingsToggle.setEnabled(false);
         exportBtn.setVisibility(View.GONE);
+        previewBtn.setVisibility(View.GONE);
         progress.setProgress(0);logs.setText("");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         Thread worker=new Thread(()->{
             File work=new File(getCacheDir(),"subtitle_work");work.mkdirs();
             try {
-                showProgress(3,"正在从视频中提取音频…");
-                AudioExtractor.AudioFile audio=AudioExtractor.extract(this,uri,work,stop,
-                    percent -> showProgress(percent,"正在提取音频…（"+percent+"%）"));
-                if(stop.get())throw new InterruptedException("任务已取消");
-                showProgress(18,"已生成标准 PCM WAV（"+(audio.file.length()/1024/1024)+" MB）");
+                // A matching private checkpoint avoids re-uploading ASR audio and replaying finished batches.
+                String sourceIdentity=TranslationCheckpoint.sourceIdentity(this,uri,originalName);
+                String configIdentity=TranslationCheckpoint.configuration(asr.id,endpoint,model,mode);
+                TranslationCheckpoint checkpoint=TranslationCheckpoint.load(this,sourceIdentity,configIdentity);
+                // An unidentifiable file must not accidentally inherit a different task's usage.
+                String job=(sourceIdentity==null?java.util.UUID.randomUUID().toString():sourceIdentity)+":"+configIdentity;
+                taskUsage=UsageLedger.open(this,job,checkpoint!=null);
                 pipeline=new CloudPipeline(stop);
+                pipeline.setUsageLedger(taskUsage);
+                // Load the curated dialogue lexicon once; only relevant hints go into requests.
+                try(java.io.InputStreamReader reader=new java.io.InputStreamReader(
+                        getAssets().open("dialogue_lexicon_v191.tsv"),StandardCharsets.UTF_8)){
+                    pipeline.setDialogueLexicon(DialogueLexicon.load(reader));
+                }
                 List<SubtitleData.Cue> cues;
-                if(AsrProviders.ASSEMBLYAI.equals(asr.id)) {
-                    assemblyTranscriber=new AssemblyAiTranscriber(stop);
-                    cues=assemblyTranscriber.transcribe(audio,asrSecret,this::showProgress);
+                if(checkpoint!=null) {
+                    cues=checkpoint.cues;
+                    showProgress(39,"已找到相同视频的恢复进度：跳过英文识别及已完成的翻译批次");
                 } else {
-                    cues=pipeline.transcribe(audio,asrSecret,this::showProgress);
+                    showProgress(3,"正在从视频中提取音频…");
+                    AudioExtractor.AudioFile audio=AudioExtractor.extract(this,uri,work,stop,
+                        percent -> showProgress(percent,"正在提取音频…（"+percent+"%）"));
+                    if(stop.get())throw new InterruptedException("任务已取消");
+                    showProgress(18,"已生成标准 PCM WAV（"+(audio.file.length()/1024/1024)+" MB）");
+                    if(AsrProviders.ASSEMBLYAI.equals(asr.id)) {
+                        assemblyTranscriber=new AssemblyAiTranscriber(stop);
+                        cues=assemblyTranscriber.transcribe(audio,asrSecret,this::showProgress);
+                    } else {
+                        cues=pipeline.transcribe(audio,asrSecret,this::showProgress);
+                    }
+                    // Privacy: keep recognized data in private app storage, never upload video.
+                    File transcript=new File(getFilesDir(),"last_english.json");
+                    try(FileOutputStream out=new FileOutputStream(transcript)){
+                        out.write(SubtitleData.toJson(cues).toString().getBytes(StandardCharsets.UTF_8));
+                    }
+                    if(sourceIdentity!=null) {
+                        checkpoint=TranslationCheckpoint.fresh(sourceIdentity,configIdentity,cues);
+                        checkpoint.save(this);
+                    }
                 }
-                // Privacy: keep recognized data in private application storage, do not upload video.
-                File transcript=new File(getFilesDir(),"last_english.json");
-                try(FileOutputStream out=new FileOutputStream(transcript)){
-                    out.write(SubtitleData.toJson(cues).toString().getBytes(StandardCharsets.UTF_8));
-                }
-                pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress);
+                pipeline.translateAndPolish(cues,translate,endpoint,model,this::showProgress,checkpoint,this,mode);
+                SubtitleQuality.Report quality=SubtitleQuality.inspect(cues);
+                String qualityText=quality.firstDetails(30);
                 String ass=AssWriter.render(cues);
+                // Invalidate the previous edit draft BEFORE replacing its ASS file.
+                // An unexpected exit must never pair an older draft with new output.
+                SubtitleDraftStore.clear(this);
                 File target=new File(getFilesDir(),"last_result.ass");
                 File tmp=new File(getFilesDir(),"last_result.ass.tmp");
                 try(FileOutputStream out=new FileOutputStream(tmp)){
@@ -650,9 +858,20 @@ public final class MainActivity extends Activity {
                     tmp.delete();
                 }
                 completedAss=target;outputName=requestedName;
+                // The editable snapshot mirrors the newly persisted ASS.
+                try { SubtitleDraftStore.save(this,cues); }
+                catch(Exception ignored){/* ASS remains downloadable even without editor data. */}
+                // Keep checkpoint until the final subtitle was actually persisted.
+                if(checkpoint!=null)TranslationCheckpoint.clear(this);
                 prefs.edit().putString("last_file",outputName).apply();
-                showProgress(100,"已完成："+outputName+"（"+cues.size()+" 段原始对白）");
-                main.post(()->exportBtn.setVisibility(View.VISIBLE));
+                // Quality reports contain local cue IDs/reasons only, never API secrets or video audio.
+                try(FileOutputStream qualityFile=new FileOutputStream(new File(getFilesDir(),"last_quality_report.txt"))){
+                    qualityFile.write(qualityText.getBytes(StandardCharsets.UTF_8));
+                }catch(Exception ignored){/* Diagnostic report is advisory, not a reason to reject the ASS. */}
+                String qualityNote=quality.findings.isEmpty()?"":"，建议复核 "+quality.findings.size()+" 处";
+                showProgress(100,"已完成："+outputName+"（"+cues.size()+" 段对白"+qualityNote+"）");
+                main.post(()->{exportBtn.setVisibility(View.VISIBLE);
+                    latestQualityReport=qualityText;qualityBtn.setVisibility(View.VISIBLE);});
             } catch(InterruptedException e) {
                 showProgress(progress.getProgress(),"任务已取消；之前完成的字幕仍保留在本机");
             } catch(Exception e) {
@@ -662,13 +881,18 @@ public final class MainActivity extends Activity {
                 pipeline=null;assemblyTranscriber=null;
                 new File(work,"asr_audio.m4a").delete();new File(work,"asr_audio.wav").delete();
                 main.post(()->{busy=false;startBtn.setEnabled(true);stopBtn.setEnabled(false);
+                    clearCheckpointBtn.setEnabled(true);
                     stopBtn.setVisibility(View.GONE);audioExportBtn.setEnabled(true);audioToolToggle.setEnabled(true);
+                    refreshResumeState();
                     for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(true);
                     asrSpinner.setEnabled(true);providerSpinner.setEnabled(true);
                     modelName.setEnabled(true);asrKey.setEnabled(true);modelKey.setEnabled(true);
+                    qualityModeSpinner.setEnabled(true);inputPrice.setEnabled(true);outputPrice.setEnabled(true);
                     apiEndpoint.setEnabled(ProviderPresets.byIndex(activeProviderIndex).custom);
                     saveBtn.setEnabled(true);settingsToggle.setEnabled(true);
                     if(completedAss!=null && completedAss.isFile())exportBtn.setVisibility(View.VISIBLE);
+                    previewBtn.setVisibility(SubtitleDraftStore.exists(this) &&
+                        completedAss!=null && completedAss.isFile()?View.VISIBLE:View.GONE);
                     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);});
             }
         },"subtitle-processing");
@@ -704,6 +928,7 @@ public final class MainActivity extends Activity {
         }
         hideKeyboard();busy=true;stop.set(false);
         startBtn.setEnabled(false);stopBtn.setEnabled(true);stopBtn.setVisibility(View.VISIBLE);
+        taskActionsRow.setVisibility(View.VISIBLE);
         audioExportBtn.setEnabled(false);audioToolToggle.setEnabled(false);
         for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(false);
         asrSpinner.setEnabled(false);providerSpinner.setEnabled(false);
@@ -762,6 +987,7 @@ public final class MainActivity extends Activity {
                     busy=false;startBtn.setEnabled(true);stopBtn.setEnabled(false);
                     stopBtn.setVisibility(View.GONE);audioExportBtn.setEnabled(true);
                     audioToolToggle.setEnabled(true);
+                    refreshResumeState();
                     for(int i=0;i<audioMode.getChildCount();i++)audioMode.getChildAt(i).setEnabled(true);
                     asrSpinner.setEnabled(true);providerSpinner.setEnabled(true);
                     modelName.setEnabled(true);saveBtn.setEnabled(true);settingsToggle.setEnabled(true);
