@@ -307,6 +307,69 @@ REVIEW_PROMPT = ("你是字幕质量终审。根据 target 的英文及当前中
  "已经正确的句子原样返回，不得误删/添加内容；按每个 id 返回非空 zh。仅 JSON items[id,zh]。")
 
 
+def _parse_model_json(text: str) -> dict:
+    """Parse a model's subtitle JSON without another paid API request.
+
+    Accept fenced JSON and two harmless, common formatting mistakes: trailing
+    commas and unescaped literal line breaks in quoted strings. This never
+    guesses a missing translation or changes subtitle identifiers or meaning.
+    """
+    if not isinstance(text, str):
+        raise RuntimeError('翻译模型返回内容不是文本；已完成的批次已保留，请稍后继续任务')
+    begin, end = text.find('{'), text.rfind('}')
+    if begin < 0 or end <= begin:
+        raise RuntimeError('翻译模型没有返回 JSON 字幕；已完成的批次已保留，继续任务会重新请求当前批次')
+    source = text[begin:end+1]
+    try:
+        obj = json.loads(source)
+    except json.JSONDecodeError:
+        repaired=[]
+        inside=False
+        slash=False
+        index=0
+        while index < len(source):
+            char=source[index]
+            if inside:
+                if slash:
+                    slash=False
+                    repaired.append(char)
+                elif char == '\\':
+                    slash=True
+                    repaired.append(char)
+                elif char == '"':
+                    inside=False
+                    repaired.append(char)
+                elif char in '\r\n':
+                    repaired.append('\\n')
+                    if char == '\r' and index+1 < len(source) and source[index+1]=='\n':
+                        index+=1
+                else:
+                    repaired.append(char)
+            elif char == '"':
+                inside=True
+                repaired.append(char)
+            elif char == ',':
+                next_index=index+1
+                while next_index<len(source) and source[next_index].isspace():
+                    next_index+=1
+                if next_index>=len(source) or source[next_index] not in '}]':
+                    repaired.append(char)
+            else:
+                repaired.append(char)
+            index+=1
+        try:
+            obj=json.loads(''.join(repaired))
+        except json.JSONDecodeError as problem:
+            raise RuntimeError(
+                f'翻译模型返回的字幕 JSON 格式错误（第 {problem.lineno} 行，第 {problem.colno} 列）。'
+                '已完成批次的断点保留；请保持同一视频、模型和质量模式，点击「继续任务」。'
+                '当前失败批次可能需要重新请求并产生 API 费用。'
+            ) from None
+    if not isinstance(obj, dict):
+        raise RuntimeError('翻译模型的字幕 JSON 结构不正确；已完成批次仍可继续')
+    return obj
+
+
 def _chat(session, endpoint: str, key: str, model: str, system: str, data: dict,
           usage: Usage, stop: Event, on_usage: Callable[[],None]) -> dict:
     payload = {'model':model,'messages':[{'role':'system','content':system},
@@ -329,16 +392,19 @@ def _chat(session, endpoint: str, key: str, model: str, system: str, data: dict,
             code=r.status_code
             r.close()
             raise RuntimeError(f'翻译 API 请求失败 HTTP {code}（未自动重复未知计费请求）')
-        response = r.json()
+        try:
+            response = r.json()
+        except ValueError:
+            raise RuntimeError('翻译服务商返回的 HTTP 数据不是有效 JSON；已保存的批次不会丢失') from None
+        if not isinstance(response, dict):
+            raise RuntimeError('翻译服务商返回的数据结构错误；已保存的批次不会丢失')
         usage.record(response)
         on_usage()  # Record tokens even if later text/JSON validation fails.
         choices=response.get('choices') or []
         if not choices or choices[0].get('finish_reason') != 'stop':
             raise RuntimeError('模型返回结果不完整，请暂停后从断点继续')
         text = choices[0].get('message',{}).get('content','')
-        if not isinstance(text,str) or '{' not in text or '}' not in text:
-            raise RuntimeError('模型未返回 JSON 字幕')
-        return json.loads(text[text.index('{'):text.rindex('}')+1])
+        return _parse_model_json(text)
     raise RuntimeError('翻译 API 限频重试已耗尽')
 
 
