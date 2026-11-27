@@ -11,8 +11,9 @@ import core
 
 class JSONRecoveryTests(unittest.TestCase):
     def test_safe_local_format_repair(self):
-        text='``json\n{"items":[{"id":1,"zh":"你好"}]}\n``'
+        text='```json\n{"items":[{"id":1,"zh":"你好"}]}\n```'
         # Ordinary fenced and plain subtitle JSON are accepted without new API calls.
+        self.assertEqual(core._parse_model_json(text)['items'][0]['zh'],'你好')
         self.assertEqual(core._parse_model_json('{"items":[{"id":1,"zh":"你好"}]}')['items'][0]['zh'],'你好')
         self.assertEqual(core._parse_model_json('{"items":[{"id":1,"zh":"你好",},],}')['items'][0]['zh'],'你好')
         self.assertEqual(core._parse_model_json('{"items":[{"id":1,"zh":"你\n好"}]}')['items'][0]['zh'],'你\n好')
