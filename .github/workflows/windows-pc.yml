@@ -1,0 +1,46 @@
+name: Windows PC subtitle tool test build
+on:
+  push:
+    branches: [feature/windows-pc]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/windows-pc.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/windows-pc.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r desktop/requirements.txt pyinstaller==6.16.0
+      - name: Offline regression tests
+        run: python -m unittest discover -s desktop/tests -v
+      - name: Build Windows portable exe
+        run: >-
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name SubtitleTool-PC
+          --add-data "desktop/dialogue_lexicon_v191.tsv:."
+          --collect-binaries imageio_ffmpeg
+          desktop/app.py
+      - name: Verify executable exists
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/SubtitleTool-PC.exe)) { throw 'Missing executable' }
+          if ((Get-Item dist/SubtitleTool-PC.exe).Length -lt 5000000) { throw 'Unexpectedly small executable' }
+      - name: Upload Windows test exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubtitleTool-PC-Windows
+          path: dist/SubtitleTool-PC.exe
+          if-no-files-found: error
+          retention-days: 30
